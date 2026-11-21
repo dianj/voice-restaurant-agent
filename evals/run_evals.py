@@ -121,6 +121,10 @@ CASES = [
          lambda r: any(a.get("cuisine") == "Italian" and a.get("city") == "Sofia" for a in calls(r, "search_restaurants"))
          and cyrillic(r["reply"]) and MARBLE[1] in r["reply"],
          "Bulgarian search uses English filters, replies in Bulgarian with the top result"),
+    Case("names-not-translated-bg", "Търся мексикански ресторант във Варна.",
+         lambda r: "Old Mill" in r["reply"] and "Стар" not in r["reply"],
+         "keeps restaurant names as they are (Qwen said 'Стар Мил' for 'Old Mill' in testing)",
+         now=datetime(2026, 11, 22, 1, 20)),  # the clock of the live test where it was seen
     Case("search-open-late", "Which Japanese restaurants in Berlin are still open at 23:30?",
          lambda r: any(a.get("open_at") == "23:30" for a in calls(r, "search_restaurants")),
          "passes the time as open_at"),
