@@ -124,4 +124,5 @@ def test_health_reports_the_model(client):
 
 def test_reservation_codes_are_spelled_for_the_voice_only():
     from restaurant.voice import clean_for_speech
-    assert clean_for_speech("Your code is R-RM952. See you!") == "Your code is R, R, M, 9, 5, 2. See you!"
+    assert clean_for_speech("Your code is R34LST. See you!") == "Your code is R, 3, 4, L, S, T. See you!"
+    assert clean_for_speech("RADIOS and ROASTS stay words.") == "RADIOS and ROASTS stay words."

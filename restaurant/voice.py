@@ -65,12 +65,12 @@ def detect_text_language(text: str) -> str:
     return best if scores[best] > 0 else config.PRIMARY_LANGUAGE
 
 
-RESERVATION_CODE = re.compile(r"\bR-([A-Z0-9]{5})\b")
+RESERVATION_CODE = re.compile(r"\bR(?=[A-Z0-9]*[0-9])[A-Z0-9]{5}\b")
 
 
 def spell_codes(text: str) -> str:
-    """'R-RM952' -> 'R, R, M, 9, 5, 2', so the voice reads a reservation code character by character."""
-    return RESERVATION_CODE.sub(lambda m: ", ".join("R" + m.group(1)), text)
+    """'R34LST' -> 'R, 3, 4, L, S, T', so the voice reads a reservation code character by character."""
+    return RESERVATION_CODE.sub(lambda m: ", ".join(m.group(0)), text)
 
 
 def clean_for_speech(text: str) -> str:

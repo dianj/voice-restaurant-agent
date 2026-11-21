@@ -5,6 +5,7 @@ and "error" (invalid input; the message says what to fix).
 """
 import json
 import random
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import date as date_cls, datetime, timedelta
@@ -179,26 +180,40 @@ def alternative_times(conn, restaurant, day: str, wanted: int, guests: int, limi
     return free
 
 
+CODE_DIGITS = "23456789"
+
+
 def new_code(conn) -> str:
+    """'R' + 5 characters with at least one digit, e.g. R34LST.
+
+    No dash: in evals the model dropped the dash of 'R-34LST' when reading the code back. The digit lets the
+    voice module recognise codes in a reply without matching ordinary words.
+    """
     rng = random.SystemRandom()
     while True:
-        code = "R-" + "".join(rng.choice(CODE_ALPHABET) for _ in range(5))
+        chars = [rng.choice(CODE_ALPHABET) for _ in range(4)] + [rng.choice(CODE_DIGITS)]
+        rng.shuffle(chars)
+        code = "R" + "".join(chars)
         if not conn.execute("SELECT 1 FROM reservations WHERE code = ?", (code,)).fetchone():
             return code
 
 
 def normalize_code(code) -> str:
-    text = str(code or "").strip().upper().replace(" ", "")
-    if text and not text.startswith("R-"):
-        text = "R-" + text.removeprefix("R")
-    return text
+    """Accept what guests and speech recognition produce: 'r34lst', 'R-34LST', 'R 3 4 L S T', '34LST'."""
+    text = re.sub(r"[^A-Z0-9]", "", str(code or "").upper())
+    return text if len(text) == 6 else "R" + text
 
 
 # --- Tools ------------------------------------------------------------------------------
 
-def search_restaurants(cuisine: str = None, city: str = None, area: str = None, min_rating: float = None,
-                       open_at: str = None, limit: int = 5):
+def search_restaurants(name: str = None, cuisine: str = None, city: str = None, area: str = None,
+                       min_rating: float = None, open_at: str = None, limit: int = 5):
     clauses, params = [], []
+    if name:
+        if not isinstance(name, str) or len(name.strip()) < 2:
+            return error("name must be at least 2 characters.")
+        clauses.append("name LIKE ?")
+        params.append(f"%{name.strip()}%")
     if cuisine:
         match = match_choice(cuisine, CUISINES)
         if not match:
@@ -358,7 +373,7 @@ def find_reservation(code: str):
     return result("success", reservation=dict(row))
 
 
-NOT_FOUND = "No reservation with code '{code}'. Ask the guest to repeat the code (format R-XXXXX)."
+NOT_FOUND = "No reservation with code '{code}'. Ask the guest to repeat the code (format R followed by 5 letters/digits, e.g. R34LST)."
 WRONG_NAME = "The name does not match this reservation. Ask the guest for the name used when booking."
 
 

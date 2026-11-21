@@ -11,9 +11,11 @@ AREAS = sorted({area for areas in LOCATIONS.values() for area in areas})
 TOOLS_SCHEMA = [
     {"type": "function", "function": {
         "name": "search_restaurants",
-        "description": "Find restaurants in the network by cuisine, city, area, minimum rating and/or a time they are open. "
-                       "Results are sorted by rating. Use English names for cuisine, city and area.",
+        "description": "Find restaurants in the network by name, cuisine, city, area, minimum rating and/or a time they "
+                       "are open. Results are sorted by rating. Use it to get the restaurant_id when the guest names a "
+                       "restaurant. Use English names for cuisine, city and area.",
         "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "Part of the restaurant name, e.g. 'Marble Hearth'."},
             "cuisine": {"type": "string", "enum": CUISINES},
             "city": {"type": "string", "enum": list(LOCATIONS)},
             "area": {"type": "string", "enum": AREAS, "description": "Neighbourhood inside the city."},
@@ -60,7 +62,7 @@ TOOLS_SCHEMA = [
     }},
     {"type": "function", "function": {
         "name": "find_reservation",
-        "description": "Look up a reservation by its code (format R-XXXXX).",
+        "description": "Look up a reservation by its code (e.g. R34LST).",
         "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
     }},
     {"type": "function", "function": {

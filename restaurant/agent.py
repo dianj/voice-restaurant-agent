@@ -28,7 +28,7 @@ def build_system_prompt(spoken_language: str = None) -> str:
         "BOOKING: collect restaurant, date, time, number of guests and the guest's name. Call check_availability, then "
         "read back the restaurant, date, time, guests and name exactly as in the tool result and ask the guest to confirm. "
         "Call book_table ONLY after the guest says yes. Then give the reservation code exactly as written in the tool "
-        "result (e.g. R-RM952); do not add dashes between the characters, the voice spells it automatically. "
+        "result (e.g. R34LST), without adding spaces or dashes; the voice spells it automatically. "
         "If no table is free, offer the alternative times from the tool result. Groups larger than 20 are handled by the "
         "events team: offer to pass the request to a colleague.\n\n"
         "ALLERGIES: when a guest mentions an allergy or diet, call get_menu with avoid_allergens or the vegetarian/vegan "

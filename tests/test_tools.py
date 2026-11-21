@@ -1,5 +1,6 @@
 """Unit tests for the booking rules, search and menu tools (no LLM). The clock is frozen at Fri 2026-11-20 10:00."""
 import json
+import re
 
 from restaurant import config, data, tools
 
@@ -112,10 +113,12 @@ def test_booking_is_saved_and_can_be_found_and_cancelled_by_its_owner():
     hours_open = tools.opening_window(restaurant()["opening_hours"])[0]
     time = tools.hhmm(hours_open + 60)
     booking = call(tools.book_table, rid, "Alex Ivanov", TOMORROW, time, 2, notes="gluten allergy")
-    assert booking["status"] == "success" and booking["reservation_code"].startswith("R-")
+    assert booking["status"] == "success" and re.fullmatch(r"R[A-Z0-9]{5}", booking["reservation_code"])
     code = booking["reservation_code"]
 
-    found = call(tools.find_reservation, code.lower().replace("-", ""))  # spoken/typed variants
+    for variant in (code.lower(), f"R-{code[1:]}", " ".join(code), code[1:]):  # typed and spoken variants
+        assert call(tools.find_reservation, variant)["reservation"]["code"] == code, variant
+    found = call(tools.find_reservation, code)
     assert found["reservation"]["customer_name"] == "Alex Ivanov"
     assert found["reservation"]["notes"] == "gluten allergy"
 
@@ -171,3 +174,8 @@ def test_cancelled_reservation_cannot_be_changed():
     _, code = book_at_10_to_22()
     call(tools.cancel_reservation, code, "Alex")
     assert "cancelled" in call(tools.update_reservation, code, "Alex", guests=3)["message"]
+
+
+def test_search_by_part_of_the_name():
+    result = call(tools.search_restaurants, name="marble hearth")
+    assert [r["name"] for r in result["restaurants"]] == ["Marble Hearth"]
