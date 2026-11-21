@@ -18,3 +18,6 @@ HANDOFF.md
 .claude/
 .env
 *.log
+
+# Eval run details (the summary evals/results/latest.md is committed)
+evals/results/*.json

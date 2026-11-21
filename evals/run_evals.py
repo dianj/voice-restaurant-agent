@@ -1,0 +1,268 @@
+"""LLM evaluation: does the real model use the tools correctly and say the right thing?
+
+Unlike the deterministic tests (which use a scripted fake LLM), this sends real conversations to the
+model loaded in LM Studio. Each case starts from a fresh copy of the demo data with the clock frozen at
+Friday 2026-11-20 10:00, and is graded on the *outcome* (reservations in the database, tool calls,
+reply), not on exact wording.
+
+Usage (LM Studio must be running with the model loaded):
+    python evals/run_evals.py
+    python evals/run_evals.py --cases book-after-confirmation time-as-digits
+Results: evals/results/latest.md (summary table) and a JSON file with every reply.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import statistics
+import sys
+import tempfile
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Callable, Optional
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+_TMP = tempfile.mkdtemp(prefix="restaurant-evals-")
+os.environ["RESTAURANT_DB_PATH"] = os.path.join(_TMP, "eval.db")
+
+from restaurant import agent, config, data, tools  # noqa: E402
+from restaurant.voice import detect_text_language  # noqa: E402
+
+RESULTS_DIR = os.path.join(ROOT, "evals", "results")
+TEMPLATE_DB = os.path.join(_TMP, "template.db")
+NOW = datetime(2026, 11, 20, 10, 0)  # Friday
+TOMORROW = "2026-11-21"
+
+# Restaurants from the deterministic demo data.
+MARBLE = ("REST-0498", "Marble Hearth")      # Italian, Sofia Center, 17:00-23:00, 100 seats
+OLIVE = ("REST-0586", "Olive Fork")          # Bulgarian, Sofia Lozenets, 10:00-22:00, 20 seats
+GRAND = ("REST-0495", "Grand Courtyard")     # Japanese, Sofia Lozenets, 10:00-22:00, 20 seats
+
+
+# --- helpers for checks ----------------------------------------------------------------
+
+def calls(run, name):
+    return [json.loads(c["arguments"] or "{}") for c in run["tools"] if c["name"] == name]
+
+
+def called(run, name):
+    return bool(calls(run, name))
+
+
+def cyrillic(text):
+    return bool(re.search(r"[Ѐ-ӿ]", text))
+
+
+def mentions(text, *words):
+    lower = text.lower()
+    return any(w in lower for w in words)
+
+
+def reservations(run):
+    return run["reservations"]
+
+
+def one_booking(run, **expected):
+    rows = [r for r in reservations(run) if r["status"] == "confirmed"]
+    return len(rows) == 1 and all(str(rows[0][k]).lower() == str(v).lower() for k, v in expected.items())
+
+
+def last_result(run, name):
+    results = [json.loads(c["result"]) for c in run["tools"] if c["name"] == name]
+    return results[-1] if results else {}
+
+
+def unsafe_dishes(restaurant_id, allergen):
+    with tools.db() as conn:
+        rows = conn.execute("SELECT dish_name, allergens FROM menu_items WHERE restaurant_id = ?", (restaurant_id,)).fetchall()
+    return [r["dish_name"] for r in rows if allergen in r["allergens"]]
+
+
+def book(name="Maria", restaurant=MARBLE, time_="19:00", guests=2):
+    return json.loads(tools.book_table(restaurant[0], name, TOMORROW, time_, guests))["reservation_code"]
+
+
+def seed_booking():
+    return {"code": book()}
+
+
+def fill_olive_fork():
+    book("Big Party", OLIVE, "19:00", 20)
+    return {}
+
+
+NEGATIVE = ("can't", "cannot", "not able", "unable", "don't", "do not", "only help", "not possible", "sorry",
+            "не мога", "нямам", "за съжаление")
+
+
+@dataclass
+class Case:
+    id: str
+    prompt: str
+    check: Callable[[dict], bool]
+    note: str
+    history: tuple = ()                        # earlier (role, text) turns; may use {code} from setup
+    setup: Optional[Callable[[], dict]] = None  # seeds data; returned values fill {placeholders}
+
+
+CASES = [
+    # --- search ---
+    Case("search-bg", "Търся италиански ресторант в центъра на София.",
+         lambda r: any(a.get("cuisine") == "Italian" and a.get("city") == "Sofia" for a in calls(r, "search_restaurants"))
+         and cyrillic(r["reply"]) and MARBLE[1] in r["reply"],
+         "Bulgarian search uses English filters, replies in Bulgarian with the top result"),
+    Case("search-open-late", "Which Japanese restaurants in Berlin are still open at 23:30?",
+         lambda r: any(a.get("open_at") == "23:30" for a in calls(r, "search_restaurants")),
+         "passes the time as open_at"),
+    Case("search-by-name", "Where exactly is Marble Hearth and when is it open?",
+         lambda r: any("marble" in (a.get("name") or "").lower() for a in calls(r, "search_restaurants"))
+         and "17:00" in r["reply"] and "23:00" in r["reply"],
+         "finds a restaurant by name and gives real opening hours"),
+    Case("unknown-city", "Can you recommend a restaurant in Paris?",
+         lambda r: not reservations(r) and mentions(r["reply"], "sofia", "plovdiv", "varna", "london", "berlin"),
+         "does not invent a Paris restaurant; names the real cities"),
+    Case("german", "Ich suche ein französisches Restaurant in Berlin.",
+         lambda r: called(r, "search_restaurants") and detect_text_language(r["reply"]) == "de",
+         "replies in German"),
+
+    # --- booking flow ---
+    Case("relative-date", "Is there a free table for 2 at Marble Hearth tomorrow at 19:30?",
+         lambda r: any(a.get("date") == TOMORROW and a.get("time") == "19:30" and a.get("guests") == 2
+                       for a in calls(r, "check_availability")) and not reservations(r),
+         "'tomorrow' becomes 2026-11-21; only checks, does not book"),
+    Case("no-booking-without-confirmation", "Book a table for 2 at Marble Hearth tomorrow at 19:30 under the name Maria.",
+         lambda r: not reservations(r) and called(r, "check_availability") and "?" in r["reply"],
+         "checks availability and asks to confirm instead of booking straight away"),
+    Case("book-after-confirmation", "Yes, please book it.",
+         lambda r: one_booking(r, restaurant=MARBLE[1], date=TOMORROW, time="19:30", guests=2, customer_name="Maria")
+         and reservations(r)[0]["code"] in r["reply"],
+         "books after the guest confirms and gives the code exactly as stored",
+         history=(("user", "Book a table for 2 at Marble Hearth tomorrow at 19:30 under the name Maria."),
+                  ("assistant", "A table for 2 at Marble Hearth on 2026-11-21 at 19:30 under the name Maria is "
+                                "available. Shall I book it?"))),
+    Case("time-as-digits", "Маса за двама в Marble Hearth утре в 19:30, на името на Мария.",
+         lambda r: "19:30" in r["reply"] and not mentions(r["reply"], "девет", "седем и половина", "половин"),
+         "reads the time back as 19:30, not in words (a real bug found in testing)"),
+    Case("full-slot-alternatives", "Do you have a table for 4 at Olive Fork tomorrow at 19:00?",
+         lambda r: not last_result(r, "check_availability").get("available", True)
+         and any(t in r["reply"] for t in last_result(r, "check_availability").get("alternatives", [])),
+         "slot is full; offers alternative times from the tool",
+         setup=fill_olive_fork),
+    Case("past-date", "Book a table for 2 at Marble Hearth yesterday at 19:30 for Maria.",
+         lambda r: not reservations(r) and mentions(r["reply"], "past", "passed", "yesterday"),
+         "refuses a time in the past"),
+    Case("large-group", "We are 30 people. Table at Marble Hearth tomorrow at 19:00, name Ivan.",
+         lambda r: not reservations(r) and mentions(r["reply"], "colleague", "events", "team"),
+         "groups over 20 go to a human"),
+
+    # --- menu and allergens ---
+    Case("allergen-gluten", "I'm allergic to gluten. What can I eat at Marble Hearth?",
+         lambda r: any("gluten" in (a.get("avoid_allergens") or []) for a in calls(r, "get_menu"))
+         and not any(d in r["reply"] for d in unsafe_dishes(MARBLE[0], "gluten"))
+         and mentions(r["reply"], "staff", "waiter", "server", "tell", "inform"),
+         "names only gluten-free dishes and reminds the guest to tell the staff"),
+    Case("no-invented-dish", "Do you serve pizza at Grand Courtyard?",
+         lambda r: called(r, "get_menu") and mentions(r["reply"], "no", "not", "don't", "doesn't"),
+         "checks the real menu (Japanese, no pizza) instead of guessing"),
+
+    # --- changes and cancellations ---
+    Case("allergy-note", "Please add a note to my reservation {code}, name Maria: my friend is allergic to gluten.",
+         lambda r: "gluten" in (reservations(r)[0]["notes"] or "").lower(),
+         "adds the allergy to the reservation (the promise that used to have no tool)",
+         setup=seed_booking),
+    Case("move-reservation", "Could you move my reservation {code} to 20:30? It's under Maria.",
+         lambda r: one_booking(r, time="20:30"),
+         "moves the booking to a new time",
+         setup=seed_booking),
+    Case("cancel-needs-name", "Cancel reservation {code}.",
+         lambda r: reservations(r)[0]["status"] == "confirmed" and mentions(r["reply"], "name"),
+         "does not cancel without the booking name",
+         setup=seed_booking),
+    Case("cancel-after-confirmation", "Yes.",
+         lambda r: reservations(r)[0]["status"] == "cancelled",
+         "cancels after the guest confirms",
+         setup=seed_booking,
+         history=(("user", "Please cancel reservation {code}, the name is Maria."),
+                  ("assistant", "I found reservation {code} for Maria at Marble Hearth on 2026-11-21 at 19:00. "
+                                "Shall I cancel it?"))),
+
+    # --- scope ---
+    Case("out-of-scope", "Can you also order me a taxi to the restaurant?",
+         lambda r: not reservations(r) and mentions(r["reply"], *NEGATIVE),
+         "says it cannot order a taxi instead of pretending"),
+]
+
+
+def run_case(case):
+    shutil.copyfile(TEMPLATE_DB, config.DB_PATH)
+    context = case.setup() if case.setup else {}
+    history = [{"role": role, "content": text.format(**context)} for role, text in case.history]
+    history.append({"role": "user", "content": case.prompt.format(**context)})
+    tool_calls = []
+    started = time.time()
+    try:
+        msg = agent.run_llm_turn(history, tool_calls)
+        reply, error = (msg.content or ""), None
+    except Exception as e:
+        reply, error = "", str(e)
+    run = {"reply": reply, "tools": tool_calls, "reservations": tools.list_reservations(),
+           "seconds": time.time() - started, "error": error}
+    try:
+        passed = error is None and bool(case.check(run))
+    except Exception as e:
+        passed, run["error"] = False, f"check failed: {e}"
+    outcome = "pass" if passed else ("error" if error and not error.startswith("check failed") else "fail")
+    return {"case": case.id, "outcome": outcome, **run}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cases", nargs="*", help="run only these case ids")
+    parser.add_argument("--repeat", type=int, default=1, help="runs per case (LLM output varies between runs)")
+    args = parser.parse_args()
+    cases = [c for c in CASES if not args.cases or c.id in args.cases]
+
+    data.build_database(TEMPLATE_DB)
+    tools.now = lambda: NOW
+    print(f"Model: {config.MODEL_NAME} at {config.LLM_BASE_URL}; {len(cases)} cases x {args.repeat}", flush=True)
+
+    results = []
+    for case in cases:
+        for attempt in range(args.repeat):
+            r = run_case(case)
+            if r["outcome"] == "error":     # one retry after an LM Studio / network error
+                r = run_case(case)
+            results.append(r)
+            print(f"  {r['outcome'].upper():<5} {case.id:<34} {r['seconds']:5.1f}s  "
+                  f"tools={[c['name'] for c in r['tools']]}", flush=True)
+            if r["outcome"] != "pass":
+                print(f"        reply: {r['reply'][:300]!r}  error: {r['error']}", flush=True)
+
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    with open(os.path.join(RESULTS_DIR, f"results-{stamp}.json"), "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+
+    passed = sum(r["outcome"] == "pass" for r in results)
+    errors = sum(r["outcome"] == "error" for r in results)
+    lines = [f"# Eval results ({stamp})", "",
+             f"Model: `{config.MODEL_NAME}` in LM Studio. {len(cases)} cases, {args.repeat} run(s) each, fresh demo data "
+             "per run, clock frozen at Fri 2026-11-20 10:00. Graded on reservations, tool calls and the reply. "
+             "Generated by `python evals/run_evals.py`.", "",
+             f"**Passed: {passed}/{len(results)}** · infrastructure errors: {errors} · "
+             f"median time per turn: {statistics.median(r['seconds'] for r in results):.1f} s", "",
+             "✅ pass · ❌ wrong behaviour · ⚠️ LM Studio / infrastructure error", "",
+             "| Case | What is checked | Result |", "|---|---|---|"]
+    for case in cases:
+        marks = "".join({"pass": "✅", "fail": "❌", "error": "⚠️"}[r["outcome"]] for r in results if r["case"] == case.id)
+        lines.append(f"| `{case.id}` | {case.note} | {marks} |")
+    with open(os.path.join(RESULTS_DIR, "latest.md"), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print("\n" + "\n".join(lines))
+
+
+if __name__ == "__main__":
+    main()
