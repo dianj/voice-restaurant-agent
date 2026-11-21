@@ -136,4 +136,40 @@ def test_voice_replies_request_tts_in_the_reply_language(page: Page, app_url, fa
 def test_header_shows_the_model_status(page: Page, app_url):
     open_app(page, app_url)
     expect(page.locator("#llmStatus .dot")).to_have_class("dot ok")
-    expect(page.locator("#llmStatus")).to_contain_text("gemma-4-26b-a4b-it")
+    expect(page.locator("#llmStatus")).to_contain_text("ready")
+
+
+def test_model_selector_switches_the_model(page: Page, app_url, fake_lm):
+    open_app(page, app_url)
+    select = page.locator("#modelSelect")
+    expect(select).to_have_value("gemma-4-26b-a4b-it")
+    expect(select.locator("option")).to_have_text(["Gemma 4 26B", "Qwen 3.8 27B"])
+    select.select_option("qwen3.8-27b")
+    expect(last_bot(page)).to_contain_text("The assistant now uses Qwen 3.8 27B.")
+    assert fake_lm.loaded == {"qwen3.8-27b"}
+    fake_lm.script(reply="Hello from Qwen")
+    send(page, "hello")
+    expect(last_bot(page)).to_contain_text("Hello from Qwen")
+    assert fake_lm.requests[-1]["model"] == "qwen3.8-27b"
+
+
+def test_text_size_buttons_scale_the_text_and_are_remembered(page: Page, app_url):
+    open_app(page, app_url)
+    message = page.locator(".msg.bot").first
+    expect(message).to_have_css("font-size", "16px")
+    page.get_by_role("button", name="Larger text").click()
+    page.get_by_role("button", name="Larger text").click()
+    expect(page.locator("#fontSizeLabel")).to_have_text("20px")
+    expect(message).to_have_css("font-size", "20px")
+    expect(page.locator("#input")).to_have_css("font-size", "20px")
+    expect(page.locator("table")).to_have_css("font-size", "17px")   # staff view scales too
+
+    page.reload()                                                     # remembered per browser
+    expect(page.locator(".msg.bot").first).to_have_css("font-size", "20px")
+
+    for _ in range(10):
+        if page.get_by_role("button", name="Smaller text").is_disabled():
+            break
+        page.get_by_role("button", name="Smaller text").click()
+    expect(page.locator("#fontSizeLabel")).to_have_text("12px")      # lower bound
+    expect(page.get_by_role("button", name="Smaller text")).to_be_disabled()

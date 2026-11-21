@@ -25,7 +25,7 @@ os.environ["RESTAURANT_DB_PATH"] = os.path.join(_TMP_DIR, "test_restaurant.db")
 os.environ["LLM_BASE_URL"] = _FAKE.base_url
 
 import server  # noqa: E402  (must come after the environment is prepared)
-from restaurant import data, tools  # noqa: E402
+from restaurant import config, data, lmstudio, tools  # noqa: E402
 
 # Friday 20 November 2026, 10:00. Every test sees this as "now".
 NOW = datetime(2026, 11, 20, 10, 0)
@@ -43,9 +43,11 @@ def fake_lm():
 
 @pytest.fixture(autouse=True)
 def clean_state(fake_lm, monkeypatch):
-    """Every test starts from the demo data with no reservations, empty sessions and an empty script."""
+    """Every test starts from the demo data, no reservations, empty sessions, Gemma active and an empty script."""
     import shutil
     fake_lm.reset()
+    fake_lm.loaded = {"gemma-4-26b-a4b-it"}
+    lmstudio.model_state.update(active=config.MODEL_NAME, switching=False, target=None, error=None)
     shutil.copyfile(_TEMPLATE_DB, os.environ["RESTAURANT_DB_PATH"])
     server.sessions.clear()
     monkeypatch.setattr(tools, "now", lambda: NOW)

@@ -10,8 +10,17 @@ CSV_PATH = os.path.join(BASE_DIR, "restaurants_1000.csv")
 
 # --- LLM (LM Studio, OpenAI-compatible API) ---
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:1235/v1")
-MODEL_NAME = os.environ.get("LLM_MODEL", "gemma-4-26b-a4b-it")
-LLM_TIMEOUT_SECONDS = 120
+LMSTUDIO_ROOT = LLM_BASE_URL.rstrip("/").removesuffix("/v1")
+# Models offered in the UI as (LM Studio model key, display label). The first one is the default.
+# Only one fits in GPU memory, so switching unloads the other one (see lmstudio.py).
+ALLOWED_MODELS = [
+    ("gemma-4-26b-a4b-it", "Gemma 4 26B"),
+    ("qwen3.8-27b", "Qwen 3.8 27B"),
+]
+MODEL_NAME = os.environ.get("LLM_MODEL", ALLOWED_MODELS[0][0])
+LOAD_CONTEXT_LENGTH = int(os.environ.get("LLM_CONTEXT_LENGTH", "16384"))
+MODEL_LOAD_TIMEOUT = 600
+LLM_TIMEOUT_SECONDS = 300  # Qwen 3.8 27B is about 4x slower than Gemma on this hardware
 MAX_TOOL_ROUNDS = 6
 # Older turns are dropped (whole user turns only, so tool-call pairs stay complete).
 MAX_HISTORY_TURNS = 12

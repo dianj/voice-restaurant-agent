@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 import server
-from restaurant import agent, config, registry, tools
+from restaurant import agent, config, lmstudio, registry, tools
 
 
 @pytest.fixture()
@@ -126,3 +126,30 @@ def test_reservation_codes_are_spelled_for_the_voice_only():
     from restaurant.voice import clean_for_speech
     assert clean_for_speech("Your code is R34LST. See you!") == "Your code is R, 3, 4, L, S, T. See you!"
     assert clean_for_speech("RADIOS and ROASTS stay words.") == "RADIOS and ROASTS stay words."
+
+
+# --- Model selection ---------------------------------------------------------------------
+
+def test_model_switch_unloads_the_current_model_first(client, fake_lm):
+    result = client.post("/api/model", data={"model": "qwen3.8-27b"}).json()
+    assert result == {"status": "success", "active": "qwen3.8-27b"}
+    assert fake_lm.loaded == {"qwen3.8-27b"}  # only one model in GPU memory
+    models = client.get("/api/models").json()
+    assert models["active"] == "qwen3.8-27b"
+    assert [m["id"] for m in models["models"]] == ["gemma-4-26b-a4b-it", "qwen3.8-27b"]
+    assert client.post("/api/model", data={"model": "gpt-9"}).status_code == 400
+
+
+def test_chat_uses_the_active_model(client, fake_lm):
+    client.post("/api/model", data={"model": "qwen3.8-27b"})
+    fake_lm.script(reply="Hi from Qwen")
+    data = chat(client, "hello")
+    assert data["model"] == "qwen3.8-27b"
+    assert fake_lm.requests[-1]["model"] == "qwen3.8-27b"
+
+
+def test_chat_waits_while_the_model_is_switching(client, fake_lm):
+    lmstudio.model_state.update(switching=True, target="qwen3.8-27b")
+    data = chat(client, "Маса за двама утре")
+    assert data["system_error"] is True and "AI модел" in data["reply"]
+    assert fake_lm.requests == []  # the LLM was not called

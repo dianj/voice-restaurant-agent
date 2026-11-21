@@ -61,7 +61,7 @@ def assistant_message_to_dict(msg) -> dict:
     return entry
 
 
-def run_llm_turn(turn_history: list, tool_calls: list, spoken_language: str = None):
+def run_llm_turn(turn_history: list, tool_calls: list, spoken_language: str = None, model: str = None):
     """Call the model, executing tool calls until it answers (or MAX_TOOL_ROUNDS is hit).
 
     Mutates turn_history and tool_calls; returns the final model message.
@@ -69,7 +69,7 @@ def run_llm_turn(turn_history: list, tool_calls: list, spoken_language: str = No
     msg = None
     for _ in range(config.MAX_TOOL_ROUNDS + 1):
         response = llm_client.chat.completions.create(
-            model=config.MODEL_NAME,
+            model=model or config.MODEL_NAME,
             messages=[{"role": "system", "content": build_system_prompt(spoken_language)}] + turn_history,
             tools=TOOLS_SCHEMA,
         )

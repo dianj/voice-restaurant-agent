@@ -5,9 +5,9 @@ model loaded in LM Studio. Each case starts from a fresh copy of the demo data w
 Friday 2026-11-20 10:00, and is graded on the *outcome* (reservations in the database, tool calls,
 reply), not on exact wording.
 
-Usage (LM Studio must be running with the model loaded):
-    python evals/run_evals.py
-    python evals/run_evals.py --cases book-after-confirmation time-as-digits
+Usage (LM Studio must be running; models are loaded one at a time, Gemma again at the end):
+    python evals/run_evals.py --repeat 2                       # all models in ALLOWED_MODELS
+    python evals/run_evals.py --models gemma-4-26b-a4b-it --cases book-after-confirmation time-as-digits
 Results: evals/results/latest.md (summary table) and a JSON file with every reply.
 """
 import argparse
@@ -28,7 +28,7 @@ sys.path.insert(0, ROOT)
 _TMP = tempfile.mkdtemp(prefix="restaurant-evals-")
 os.environ["RESTAURANT_DB_PATH"] = os.path.join(_TMP, "eval.db")
 
-from restaurant import agent, config, data, tools  # noqa: E402
+from restaurant import agent, config, data, lmstudio, tools  # noqa: E402
 from restaurant.voice import detect_text_language  # noqa: E402
 
 RESULTS_DIR = os.path.join(ROOT, "evals", "results")
@@ -208,7 +208,7 @@ CASES = [
 ]
 
 
-def run_case(case):
+def run_case(case, model):
     shutil.copyfile(TEMPLATE_DB, config.DB_PATH)
     clock = case.now or NOW
     tools.now = lambda: clock
@@ -218,14 +218,14 @@ def run_case(case):
     try:
         for text in case.lead_in:
             history.append({"role": "user", "content": text})
-            history.append({"role": "assistant", "content": agent.run_llm_turn(history, []).content or ""})
+            history.append({"role": "assistant", "content": agent.run_llm_turn(history, [], model=model).content or ""})
     except Exception as e:
         return {"case": case.id, "outcome": "error", "reply": "", "tools": [], "reservations": [], "seconds": 0,
                 "error": f"lead-in failed: {e}"}
     history.append({"role": "user", "content": case.prompt.format(**context)})
     started = time.time()
     try:
-        msg = agent.run_llm_turn(history, tool_calls)
+        msg = agent.run_llm_turn(history, tool_calls, model=model)
         reply, error = (msg.content or ""), None
     except Exception as e:
         reply, error = "", str(e)
@@ -241,44 +241,57 @@ def run_case(case):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--models", nargs="*", default=[m for m, _ in config.ALLOWED_MODELS])
     parser.add_argument("--cases", nargs="*", help="run only these case ids")
     parser.add_argument("--repeat", type=int, default=1, help="runs per case (LLM output varies between runs)")
     args = parser.parse_args()
     cases = [c for c in CASES if not args.cases or c.id in args.cases]
+    labels = dict(config.ALLOWED_MODELS)
 
     data.build_database(TEMPLATE_DB)
-    print(f"Model: {config.MODEL_NAME} at {config.LLM_BASE_URL}; {len(cases)} cases x {args.repeat}", flush=True)
-
-    results = []
-    for case in cases:
-        for attempt in range(args.repeat):
-            r = run_case(case)
-            if r["outcome"] == "error":     # one retry after an LM Studio / network error
-                r = run_case(case)
-            results.append(r)
-            print(f"  {r['outcome'].upper():<5} {case.id:<34} {r['seconds']:5.1f}s  "
-                  f"tools={[c['name'] for c in r['tools']]}", flush=True)
-            if r["outcome"] != "pass":
-                print(f"        reply: {r['reply'][:300]!r}  error: {r['error']}", flush=True)
+    results = {}
+    for model in args.models:
+        print(f"\n=== {model}: loading in LM Studio ({len(cases)} cases x {args.repeat}) ...", flush=True)
+        switched = lmstudio.switch_model(model)
+        if switched["status"] != "success":
+            print(f"    could not load: {switched['message']}")
+            continue
+        results[model] = []
+        for case in cases:
+            for _ in range(args.repeat):
+                r = run_case(case, model)
+                if r["outcome"] == "error":     # one retry after an LM Studio error, reloading the model
+                    lmstudio.switch_model(model)
+                    r = run_case(case, model)
+                results[model].append(r)
+                print(f"  {r['outcome'].upper():<5} {case.id:<34} {r['seconds']:5.1f}s  "
+                      f"tools={[c['name'] for c in r['tools']]}", flush=True)
+                if r["outcome"] != "pass":
+                    print(f"        reply: {r['reply'][:300]!r}  error: {r['error']}", flush=True)
+    lmstudio.switch_model(config.MODEL_NAME)  # leave LM Studio with the default model loaded
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d")
     with open(os.path.join(RESULTS_DIR, f"results-{stamp}.json"), "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
-    passed = sum(r["outcome"] == "pass" for r in results)
-    errors = sum(r["outcome"] == "error" for r in results)
     lines = [f"# Eval results ({stamp})", "",
-             f"Model: `{config.MODEL_NAME}` in LM Studio. {len(cases)} cases, {args.repeat} run(s) each, fresh demo data "
-             "per run, clock frozen at Fri 2026-11-20 10:00. Graded on reservations, tool calls and the reply. "
+             f"{len(cases)} cases, {args.repeat} run(s) each, fresh demo data per run, clock frozen (Fri 2026-11-20 "
+             "10:00 unless a case sets its own). Graded on reservations, tool calls and the reply. "
              "Generated by `python evals/run_evals.py`.", "",
-             f"**Passed: {passed}/{len(results)}** · infrastructure errors: {errors} · "
-             f"median time per turn: {statistics.median(r['seconds'] for r in results):.1f} s", "",
-             "✅ pass · ❌ wrong behaviour · ⚠️ LM Studio / infrastructure error", "",
-             "| Case | What is checked | Result |", "|---|---|---|"]
+             "| Model | Passed | Infra errors | Median time per turn |", "|---|---|---|---|"]
+    for model, rows in results.items():
+        passed = sum(r["outcome"] == "pass" for r in rows)
+        errors = sum(r["outcome"] == "error" for r in rows)
+        lines.append(f"| {labels.get(model, model)} | **{passed}/{len(rows)}** | {errors} | "
+                     f"{statistics.median(r['seconds'] for r in rows):.1f} s |")
+    lines += ["", "✅ pass · ❌ wrong behaviour · ⚠️ LM Studio / infrastructure error (not counted as a model failure)",
+              "", "| Case | What is checked | " + " | ".join(labels.get(m, m) for m in results) + " |",
+              "|---|---|" + "---|" * len(results)]
     for case in cases:
-        marks = "".join({"pass": "✅", "fail": "❌", "error": "⚠️"}[r["outcome"]] for r in results if r["case"] == case.id)
-        lines.append(f"| `{case.id}` | {case.note} | {marks} |")
+        cells = ["".join({"pass": "✅", "fail": "❌", "error": "⚠️"}[r["outcome"]]
+                         for r in results[model] if r["case"] == case.id) for model in results]
+        lines.append(f"| `{case.id}` | {case.note} | " + " | ".join(cells) + " |")
     with open(os.path.join(RESULTS_DIR, "latest.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
     print("\n" + "\n".join(lines))

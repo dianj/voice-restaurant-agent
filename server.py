@@ -1,4 +1,4 @@
-"""FastAPI app: chat (text or voice), text-to-speech, staff view of reservations and health check.
+"""FastAPI app: chat (text or voice), text-to-speech, staff view of reservations, model switching and health.
 
 The logic lives in the `restaurant` package; this module wires it to HTTP. Run with: uvicorn server:app
 """
@@ -7,8 +7,10 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import uuid
 from collections import OrderedDict
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -18,13 +20,21 @@ from openai import APIConnectionError, APITimeoutError
 from restaurant import config
 from restaurant.agent import llm_client, run_llm_turn, trim_history
 from restaurant.data import ensure_database
+from restaurant.lmstudio import ensure_default_model_on_startup, list_available_models, model_state, switch_model
 from restaurant.tools import list_reservations
 from restaurant.voice import clean_for_speech, detect_text_language, synthesize_speech, transcribe_audio
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("restaurant")
 
-app = FastAPI(title="Multilingual Voice Restaurant Agent")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Load the default model in the background so the page is available while LM Studio loads it.
+    threading.Thread(target=ensure_default_model_on_startup, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Multilingual Voice Restaurant Agent", lifespan=lifespan)
 ensure_database()
 
 MAX_SESSIONS = 200
@@ -32,6 +42,8 @@ MAX_MESSAGE_CHARS = 1000
 SESSION_COOKIE = "restaurant_session"
 # session id -> {"history": [...], "lock": asyncio.Lock()}; the oldest sessions are dropped first.
 sessions: "OrderedDict[str, dict]" = OrderedDict()
+# Turns waiting for the LLM right now; a model switch would unload the model they are using.
+active_turns = 0
 
 NOT_UNDERSTOOD = {
     "en": "Sorry, I didn't catch that. Could you say it again?",
@@ -40,6 +52,10 @@ NOT_UNDERSTOOD = {
     "es": "Perdone, no le he entendido. ¿Podría repetirlo?",
     "fr": "Pardon, je n'ai pas bien compris. Pourriez-vous répéter ?",
     "it": "Mi scusi, non ho capito. Può ripetere?",
+}
+MODEL_SWITCHING = {
+    "en": "One moment please, the assistant is switching to another AI model. Try again in a minute.",
+    "bg": "Момент, моля: асистентът превключва към друг AI модел. Опитайте отново след минута.",
 }
 TECHNICAL_PROBLEM = {
     "en": "Sorry, I have a technical problem right now. Let me transfer you to a colleague.",
@@ -113,13 +129,21 @@ async def api_chat(request: Request, message: str = Form(""), audio: UploadFile 
     if not text:
         return with_cookie({"error": "Type a message or record one."}, session_id, 400)
     text = text[:MAX_MESSAGE_CHARS]
+    if model_state["switching"]:
+        language = spoken_language or detect_text_language(text)
+        return with_cookie({"user_text": text, "spoken_language": spoken_language, "reply_language": language,
+                            "reply": MODEL_SWITCHING.get(language, MODEL_SWITCHING["en"]), "tool_calls": [],
+                            "system_error": True}, session_id)
+    active_model = model_state["active"]
 
+    global active_turns
     async with session["lock"]:  # one turn at a time per conversation
+        active_turns += 1
         # Work on a copy, so a failed turn never leaves a half-finished tool exchange in the session.
         turn_history = session["history"] + [{"role": "user", "content": text}]
         tool_calls = []
         try:
-            msg = await run_in_threadpool(run_llm_turn, turn_history, tool_calls, spoken_language)
+            msg = await run_in_threadpool(run_llm_turn, turn_history, tool_calls, spoken_language, active_model)
             if msg.tool_calls:
                 reply = TECHNICAL_PROBLEM.get(spoken_language or detect_text_language(text), TECHNICAL_PROBLEM["en"])
                 log.warning("Tool loop limit reached")
@@ -134,10 +158,12 @@ async def api_chat(request: Request, message: str = Form(""), audio: UploadFile 
         except Exception:
             log.exception("Chat turn failed")
             reply, failed = None, True
+        finally:
+            active_turns -= 1
 
     reply_language = detect_text_language(reply) if reply else (spoken_language or detect_text_language(text))
     payload = {"user_text": text, "spoken_language": spoken_language, "reply_language": reply_language,
-               "tool_calls": [tool_summary(c) for c in tool_calls]}
+               "tool_calls": [tool_summary(c) for c in tool_calls], "model": active_model}
     if failed:
         payload.update(reply=TECHNICAL_PROBLEM.get(reply_language, TECHNICAL_PROBLEM["en"]), system_error=True)
     else:
@@ -173,9 +199,31 @@ def api_reservations():
 
 @app.get("/api/health")
 def api_health():
+    active = model_state["active"]
     try:
         models = [m.id for m in llm_client.with_options(timeout=3, max_retries=0).models.list().data]
-        llm = {"reachable": True, "model_available": config.MODEL_NAME in models}
+        llm = {"reachable": True, "model_available": active in models}
     except Exception:
         llm = {"reachable": False, "model_available": False}
-    return {"llm": llm, "model": config.MODEL_NAME, "llm_base_url": config.LLM_BASE_URL}
+    return {"llm": llm, "model": active, "switching": model_state["switching"], "llm_base_url": config.LLM_BASE_URL}
+
+
+@app.get("/api/models")
+def api_models():
+    return {"models": list_available_models(), "active": model_state["active"],
+            "switching": model_state["switching"], "target": model_state["target"]}
+
+
+@app.post("/api/model")
+def api_select_model(model: str = Form(...)):
+    # Sync endpoint: FastAPI runs it in a worker thread, so the long LM Studio load does not block the server.
+    if model not in {model_id for model_id, _ in config.ALLOWED_MODELS}:
+        return JSONResponse({"status": "error", "message": f"Unknown model '{model}'."}, status_code=400)
+    if model_state["switching"]:
+        return JSONResponse({"status": "error", "message": "Another model switch is already in progress."},
+                            status_code=409)
+    if active_turns:
+        return JSONResponse({"status": "error", "message": "A guest is waiting for a reply; try again in a moment."},
+                            status_code=409)
+    result = switch_model(model)
+    return JSONResponse(result, status_code=200 if result["status"] == "success" else 500)
