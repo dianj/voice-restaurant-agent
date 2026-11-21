@@ -94,6 +94,10 @@ def fill_olive_fork():
     return {}
 
 
+# First-person "I confirm / we confirmed / we booked" forms (incl. the Russian-like "подтверждавам" Gemma produced).
+EARLY_CONFIRMATION = re.compile(r"(под|по)тв[еъ]р(жд|д)ава(м|ме)|потвърдихме|запотвърд|потвърдена|резервирахме|"
+                                r"запазихме|резервирах|запазих")
+
 NEGATIVE = ("can't", "cannot", "not able", "unable", "don't", "do not", "only help", "not possible", "sorry",
             "не мога", "нямам", "за съжаление")
 
@@ -106,6 +110,9 @@ class Case:
     note: str
     history: tuple = ()                        # earlier (role, text) turns; may use {code} from setup
     setup: Optional[Callable[[], dict]] = None  # seeds data; returned values fill {placeholders}
+    now: Optional[datetime] = None             # clock for this case (default: NOW)
+    lead_in: tuple = ()                        # earlier user turns that really run through the model first,
+                                               # so the history holds real tool calls and results
 
 
 CASES = [
@@ -136,6 +143,11 @@ CASES = [
     Case("no-booking-without-confirmation", "Book a table for 2 at Marble Hearth tomorrow at 19:30 under the name Maria.",
          lambda r: not reservations(r) and called(r, "check_availability") and "?" in r["reply"],
          "checks availability and asks to confirm instead of booking straight away"),
+    Case("no-early-confirmation-bg", "Първият звучи добре. Искам маса за двама в 19:30 на името на Мария Петрова.",
+         lambda r: not reservations(r) and "?" in r["reply"] and not EARLY_CONFIRMATION.search(r["reply"].lower()),
+         "before booking, says the table is available and asks; never claims it is already confirmed (seen in testing)",
+         lead_in=("Здравейте! Търся италиански ресторант в центъра на София за утре вечер.",),
+         now=datetime(2026, 11, 22, 0, 40)),  # the late-night clock of the live test where it was seen
     Case("book-after-confirmation", "Yes, please book it.",
          lambda r: one_booking(r, restaurant=MARBLE[1], date=TOMORROW, time="19:30", guests=2, customer_name="Maria")
          and reservations(r)[0]["code"] in r["reply"],
@@ -198,10 +210,19 @@ CASES = [
 
 def run_case(case):
     shutil.copyfile(TEMPLATE_DB, config.DB_PATH)
+    clock = case.now or NOW
+    tools.now = lambda: clock
     context = case.setup() if case.setup else {}
     history = [{"role": role, "content": text.format(**context)} for role, text in case.history]
-    history.append({"role": "user", "content": case.prompt.format(**context)})
     tool_calls = []
+    try:
+        for text in case.lead_in:
+            history.append({"role": "user", "content": text})
+            history.append({"role": "assistant", "content": agent.run_llm_turn(history, []).content or ""})
+    except Exception as e:
+        return {"case": case.id, "outcome": "error", "reply": "", "tools": [], "reservations": [], "seconds": 0,
+                "error": f"lead-in failed: {e}"}
+    history.append({"role": "user", "content": case.prompt.format(**context)})
     started = time.time()
     try:
         msg = agent.run_llm_turn(history, tool_calls)
@@ -226,7 +247,6 @@ def main():
     cases = [c for c in CASES if not args.cases or c.id in args.cases]
 
     data.build_database(TEMPLATE_DB)
-    tools.now = lambda: NOW
     print(f"Model: {config.MODEL_NAME} at {config.LLM_BASE_URL}; {len(cases)} cases x {args.repeat}", flush=True)
 
     results = []
