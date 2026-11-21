@@ -1,0 +1,77 @@
+"""Shared fixtures: a fake LM Studio, a fresh demo database per test, a frozen clock and the real app.
+
+Environment variables must be set before `server` (and the `restaurant` package) is imported,
+because they are read at import time.
+"""
+import os
+import socket
+import sys
+import tempfile
+import threading
+import time
+from datetime import datetime
+
+import pytest
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from fake_lmstudio import FakeLMStudio  # noqa: E402
+
+_TMP_DIR = tempfile.mkdtemp(prefix="restaurant-tests-")
+_FAKE = FakeLMStudio().start()
+os.environ["RESTAURANT_DB_PATH"] = os.path.join(_TMP_DIR, "test_restaurant.db")
+os.environ["LLM_BASE_URL"] = _FAKE.base_url
+
+import server  # noqa: E402  (must come after the environment is prepared)
+from restaurant import data, tools  # noqa: E402
+
+# Friday 20 November 2026, 10:00. Every test sees this as "now".
+NOW = datetime(2026, 11, 20, 10, 0)
+
+# One fresh database is built once and copied for each test (building it takes longer than copying).
+_TEMPLATE_DB = os.path.join(_TMP_DIR, "template.db")
+data.build_database(_TEMPLATE_DB)
+
+
+@pytest.fixture(scope="session")
+def fake_lm():
+    yield _FAKE
+    _FAKE.stop()
+
+
+@pytest.fixture(autouse=True)
+def clean_state(fake_lm, monkeypatch):
+    """Every test starts from the demo data with no reservations, empty sessions and an empty script."""
+    import shutil
+    fake_lm.reset()
+    shutil.copyfile(_TEMPLATE_DB, os.environ["RESTAURANT_DB_PATH"])
+    server.sessions.clear()
+    monkeypatch.setattr(tools, "now", lambda: NOW)
+    yield
+
+
+def _free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture(scope="session")
+def app_url(fake_lm):
+    """Run the real FastAPI app (uvicorn) in a background thread."""
+    import uvicorn
+
+    port = _free_port()
+    uv = uvicorn.Server(uvicorn.Config(server.app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=uv.run, daemon=True)
+    thread.start()
+    deadline = time.time() + 15
+    while not uv.started:
+        if time.time() > deadline:
+            raise RuntimeError("uvicorn did not start")
+        time.sleep(0.05)
+    yield f"http://127.0.0.1:{port}"
+    uv.should_exit = True
+    thread.join(timeout=5)

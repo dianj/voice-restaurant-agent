@@ -3,5 +3,5 @@ uvicorn
 python-multipart
 openai
 faster-whisper
+av<19  # faster-whisper 1.2.x passes metadata_errors, removed in PyAV 19
 edge-tts
-pandas
