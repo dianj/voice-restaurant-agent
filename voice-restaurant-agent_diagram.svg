@@ -1,0 +1,193 @@
+<svg style="background: #000;" class="dark " xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1446.63 942.7" width="1446.63" height="942.7" id="m6416ef__root" data-diagram-type="sequence">
+  <style data-mercat-style="universal">.mercat text{font-family:'Google Sans',Roboto,Arial,sans-serif;fill:var(--m-text);dominant-baseline:central}.mercat .m-node .m-shape{fill:var(--m-node-fill);stroke:var(--m-node-stroke);stroke-width:1.5px}.mercat .m-edge .m-path{fill:none;stroke:var(--m-line);stroke-width:1.5px}.mercat .m-edge--dashed .m-path,.mercat .m-edge--dashed{stroke-dasharray:5 4}.mercat .m-edge-label .m-shape{fill:var(--m-pill-bg);stroke:var(--m-pill-border);stroke-width:1px}.mercat .m-edge-label .m-label{fill:var(--m-text-sec)}.mercat .m-group .m-shape{fill:var(--m-group-fill);stroke:var(--m-group-stroke);stroke-width:1px}.mercat .m-group .m-frame{fill:none;stroke:var(--m-group-stroke);stroke-width:1px}.mercat .m-group .m-label{fill:var(--m-group-text)}.mercat .t-label{font-size:13px;font-weight:500}.mercat .t-edge{font-size:11px;font-weight:400}</style>
+  <style data-mercat-style="theme-light">#m6416ef__root{--m-text:#1f1f1f;--m-text-sec:#797979;--m-line:#545454;--m-node-fill:#f8f9fa;--m-node-stroke:#747775;--m-group-fill:#f8f9fa;--m-group-stroke:#747775;--m-group-hdr:#f4f4f4;--m-group-text:#1f1f1f;--m-pill-bg:#fbfbfb;--m-pill-border:#d7d7d7}</style>
+  <style data-mercat-style="theme-dark">#m6416ef__root.dark{--m-text:#e3e3e3;--m-text-sec:#959595;--m-line:#bfbfbf;--m-node-fill:#2d2e30;--m-node-stroke:#8e918f;--m-group-fill:#2d2e30;--m-group-stroke:#8e918f;--m-group-hdr:#292929;--m-group-text:#e3e3e3;--m-pill-bg:#232323;--m-pill-border:#424242}</style>
+  <style data-mercat-style="type">#m6416ef__root .seq-actor-icon-bg{fill:none;stroke:var(--m-line);stroke-width:1.5px}#m6416ef__root .seq-actor-icon-line{fill:none;stroke:var(--m-line);stroke-width:1.5px}#m6416ef__root .seq-lifeline&gt;.m-path{fill:none;stroke:var(--m-line);stroke-width:0.75px;stroke-dasharray:6 4}#m6416ef__root .seq-block-box{fill:none;stroke:var(--m-node-stroke);stroke-width:1.5px}#m6416ef__root .seq-block-badge&gt;.m-shape{fill:var(--m-group-hdr);stroke:var(--m-node-stroke);stroke-width:1.5px}#m6416ef__root .seq-block-badge&gt;.m-label{fill:var(--m-text)}#m6416ef__root .seq-block-guard&gt;.m-label{fill:var(--m-text)}#m6416ef__root .seq-block-divider{fill:none;stroke:var(--m-node-stroke);stroke-width:0.85px;stroke-dasharray:5 3}</style>
+  <g class="mercat mercat-sequence">
+    <defs>
+      <marker id="m6416ef__mk-arrow" refX="9.45" refY="3.4" markerWidth="10.8" markerHeight="6.8" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+        <path d="M 0 0 L 10.8 3.4 L 0 6.8 Z" class="m-marker" fill="var(--m-line)" stroke="none"/>
+      </marker>
+    </defs>
+    <g>
+      <g class="seq-lifeline">
+        <line x1="117.83" y1="92.45" x2="117.83" y2="850.25" class="m-path"/>
+      </g>
+      <g class="seq-lifeline">
+        <line x1="339.73" y1="70" x2="339.73" y2="850.25" class="m-path"/>
+      </g>
+      <g class="seq-lifeline">
+        <line x1="629.27" y1="70" x2="629.27" y2="850.25" class="m-path"/>
+      </g>
+      <g class="seq-lifeline">
+        <line x1="904.3" y1="70" x2="904.3" y2="850.25" class="m-path"/>
+      </g>
+      <g class="seq-lifeline">
+        <line x1="1160.13" y1="70" x2="1160.13" y2="850.25" class="m-path"/>
+      </g>
+      <g class="seq-lifeline">
+        <line x1="1362.97" y1="70" x2="1362.97" y2="850.25" class="m-path"/>
+      </g>
+      <g class="m-group seq-block" id="m6416ef__group__alt_5f0" data-role="group">
+        <rect x="63.83" y="250.35" width="1349.14" height="579.9" rx="2" ry="2" class="m-frame seq-block-box"/>
+        <g class="seq-block-badge">
+          <polygon points="63.83,250.35 105.83,250.35 105.83,264.85 100.33,270.35 63.83,270.35" class="m-shape"/>
+          <text x="83.87" y="260.35" class="m-label t-edge" text-anchor="middle">alt</text>
+        </g>
+        <g class="seq-block-guard">
+          <text x="129.83" y="260.35" class="m-label t-edge" text-anchor="start">Unintelligible audio or empty transcript</text>
+        </g>
+        <line x1="63.83" y1="410.25" x2="1412.97" y2="410.25" class="m-path seq-block-divider"/>
+        <g class="seq-block-badge">
+          <polygon points="63.83,410.25 105.83,410.25 105.83,424.75 100.33,430.25 63.83,430.25" class="m-shape"/>
+          <text x="83.87" y="420.25" class="m-label t-edge" text-anchor="middle">else</text>
+        </g>
+        <g class="seq-block-guard">
+          <text x="129.83" y="420.25" class="m-label t-edge" text-anchor="start">Valid transcript</text>
+        </g>
+      </g>
+      <g class="m-node m-edge" id="m6416ef__edge__Customer__API__0" data-role="connector">
+        <path d="M 117.83 131.75 L 339.73 131.75" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="228.78" y="119.6" class="m-label t-edge" text-anchor="middle">POST /voice-chat (WebM Audio)</text>
+        </g>
+      </g>
+      <g class="m-node m-edge" id="m6416ef__edge__API__STT__0" data-role="connector">
+        <path d="M 339.73 175.05 L 629.27 175.05" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="484.5" y="162.9" class="m-label t-edge" text-anchor="middle">Transcribe audio</text>
+        </g>
+      </g>
+      <g class="m-node m-edge m-edge--dashed" id="m6416ef__edge__STT__API__0" data-role="connector">
+        <path d="M 629.27 218.35 L 339.73 218.35" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="484.5" y="206.2" class="m-label t-edge" text-anchor="middle">Text + Detected Language (e.g., "bg" / "en")</text>
+        </g>
+      </g>
+      <g class="m-node m-edge" id="m6416ef__edge__API__TTS__0" data-role="connector">
+        <path d="M 339.73 303.65 L 1362.97 303.65" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="484.5" y="291.5" class="m-label t-edge" text-anchor="middle">Synthesize polite repeat request</text>
+        </g>
+      </g>
+      <g class="m-node m-edge m-edge--dashed" id="m6416ef__edge__TTS__API__0" data-role="connector">
+        <path d="M 1362.97 346.95 L 339.73 346.95" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="1261.55" y="334.8" class="m-label t-edge" text-anchor="middle">MP3 Audio (Fallback)</text>
+        </g>
+      </g>
+      <g class="m-node m-edge m-edge--dashed" id="m6416ef__edge__API__Customer__0" data-role="connector">
+        <path d="M 339.73 390.25 L 117.83 390.25" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="228.78" y="378.1" class="m-label t-edge" text-anchor="middle">Play repeat prompt</text>
+        </g>
+      </g>
+      <g class="m-node m-edge" id="m6416ef__edge__API__LLM__0" data-role="connector">
+        <path d="M 339.73 463.85 L 904.3 463.85" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="484.5" y="451.7" class="m-label t-edge" text-anchor="middle">Send text + Tool definitions</text>
+        </g>
+      </g>
+      <g class="m-node m-edge m-edge--dashed" id="m6416ef__edge__LLM__API__0" data-role="connector">
+        <path d="M 904.3 507.15 L 339.73 507.15" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="766.79" y="495" class="m-label t-edge" text-anchor="middle">Tool Call: check_and_book_table(...)</text>
+        </g>
+      </g>
+      <g class="m-node m-edge" id="m6416ef__edge__API__DB__0" data-role="connector">
+        <path d="M 339.73 550.45 L 1160.13 550.45" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="484.5" y="538.3" class="m-label t-edge" text-anchor="middle">Check seating capacity &amp; insert reservation</text>
+        </g>
+      </g>
+      <g class="m-node m-edge m-edge--dashed" id="m6416ef__edge__DB__API__0" data-role="connector">
+        <path d="M 1160.13 593.75 L 339.73 593.75" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="1032.22" y="581.6" class="m-label t-edge" text-anchor="middle">JSON result (Confirmed / Failed)</text>
+        </g>
+      </g>
+      <g class="m-node m-edge" id="m6416ef__edge__API__LLM__1" data-role="connector">
+        <path d="M 339.73 637.05 L 904.3 637.05" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="484.5" y="624.9" class="m-label t-edge" text-anchor="middle">Return SQL tool output</text>
+        </g>
+      </g>
+      <g class="m-node m-edge m-edge--dashed" id="m6416ef__edge__LLM__API__1" data-role="connector">
+        <path d="M 904.3 680.35 L 339.73 680.35" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="766.79" y="668.2" class="m-label t-edge" text-anchor="middle">Natural response in customer's language</text>
+        </g>
+      </g>
+      <g class="m-node m-edge" id="m6416ef__edge__API__TTS__1" data-role="connector">
+        <path d="M 339.73 723.65 L 1362.97 723.65" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="484.5" y="711.5" class="m-label t-edge" text-anchor="middle">Convert text to speech</text>
+        </g>
+      </g>
+      <g class="m-node m-edge m-edge--dashed" id="m6416ef__edge__TTS__API__1" data-role="connector">
+        <path d="M 1362.97 766.95 L 339.73 766.95" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="1261.55" y="754.8" class="m-label t-edge" text-anchor="middle">MP3 Audio</text>
+        </g>
+      </g>
+      <g class="m-node m-edge m-edge--dashed" id="m6416ef__edge__API__Customer__1" data-role="connector">
+        <path d="M 339.73 810.25 L 117.83 810.25" class="m-path" marker-end="url(#m6416ef__mk-arrow)"/>
+        <g class="m-edge-label">
+          <text x="228.78" y="798.1" class="m-label t-edge" text-anchor="middle">JSON + Voice response</text>
+        </g>
+      </g>
+      <g class="m-node m-node--actor seq-actor" id="m6416ef__node__Customer" data-role="actor">
+        <circle cx="117.83" cy="50" r="13.5" class="m-shape seq-actor-icon-bg"/>
+        <circle cx="117.83" cy="47" r="4.5" class="m-path seq-actor-icon-line"/>
+        <path d="M 108.27 59.53 C 110.46 57.56, 113.93 56, 117.83 56 C 121.73 56, 125.19 57.56, 127.38 59.53" class="m-path seq-actor-icon-line"/>
+        <text x="117.83" y="84" class="m-label t-label" text-anchor="middle">Customer (Browser)</text>
+      </g>
+      <g class="m-node m-node--round-rect seq-actor" id="m6416ef__node__API" data-role="actor">
+        <rect x="266.93" y="30" width="145.6" height="40" rx="4" ry="4" class="m-shape"/>
+        <text x="339.73" y="50" class="m-label t-label" text-anchor="middle">FastAPI Server</text>
+      </g>
+      <g class="m-node m-node--round-rect seq-actor" id="m6416ef__node__STT" data-role="actor">
+        <rect x="534.37" y="30" width="189.8" height="40" rx="4" ry="4" class="m-shape"/>
+        <text x="629.27" y="50" class="m-label t-label" text-anchor="middle">Faster-Whisper (STT)</text>
+      </g>
+      <g class="m-node m-node--round-rect seq-actor" id="m6416ef__node__LLM" data-role="actor">
+        <rect x="797.64" y="30" width="213.31" height="40" rx="4" ry="4" class="m-shape"/>
+        <text x="904.3" y="50" class="m-label t-label" text-anchor="middle">Gemma 4-26B (LM Studio)</text>
+      </g>
+      <g class="m-node m-node--round-rect seq-actor" id="m6416ef__node__DB" data-role="actor">
+        <rect x="1050.96" y="30" width="218.35" height="40" rx="4" ry="4" class="m-shape"/>
+        <text x="1160.13" y="50" class="m-label t-label" text-anchor="middle">SQLite (1,000 Restaurants)</text>
+      </g>
+      <g class="m-node m-node--round-rect seq-actor" id="m6416ef__node__TTS" data-role="actor">
+        <rect x="1309.31" y="30" width="107.32" height="40" rx="4" ry="4" class="m-shape"/>
+        <text x="1362.97" y="50" class="m-label t-label" text-anchor="middle">Edge-TTS</text>
+      </g>
+      <g class="m-node m-node--actor seq-actor">
+        <circle cx="117.83" cy="870.25" r="13.5" class="m-shape seq-actor-icon-bg"/>
+        <circle cx="117.83" cy="867.25" r="4.5" class="m-path seq-actor-icon-line"/>
+        <path d="M 108.27 879.78 C 110.46 877.81, 113.93 876.25, 117.83 876.25 C 121.73 876.25, 125.19 877.81, 127.38 879.78" class="m-path seq-actor-icon-line"/>
+        <text x="117.83" y="904.25" class="m-label t-label" text-anchor="middle">Customer (Browser)</text>
+      </g>
+      <g class="m-node m-node--round-rect seq-actor">
+        <rect x="266.93" y="850.25" width="145.6" height="40" rx="4" ry="4" class="m-shape"/>
+        <text x="339.73" y="870.25" class="m-label t-label" text-anchor="middle">FastAPI Server</text>
+      </g>
+      <g class="m-node m-node--round-rect seq-actor">
+        <rect x="534.37" y="850.25" width="189.8" height="40" rx="4" ry="4" class="m-shape"/>
+        <text x="629.27" y="870.25" class="m-label t-label" text-anchor="middle">Faster-Whisper (STT)</text>
+      </g>
+      <g class="m-node m-node--round-rect seq-actor">
+        <rect x="797.64" y="850.25" width="213.31" height="40" rx="4" ry="4" class="m-shape"/>
+        <text x="904.3" y="870.25" class="m-label t-label" text-anchor="middle">Gemma 4-26B (LM Studio)</text>
+      </g>
+      <g class="m-node m-node--round-rect seq-actor">
+        <rect x="1050.96" y="850.25" width="218.35" height="40" rx="4" ry="4" class="m-shape"/>
+        <text x="1160.13" y="870.25" class="m-label t-label" text-anchor="middle">SQLite (1,000 Restaurants)</text>
+      </g>
+      <g class="m-node m-node--round-rect seq-actor">
+        <rect x="1309.31" y="850.25" width="107.32" height="40" rx="4" ry="4" class="m-shape"/>
+        <text x="1362.97" y="870.25" class="m-label t-label" text-anchor="middle">Edge-TTS</text>
+      </g>
+    </g>
+  </g>
+</svg>

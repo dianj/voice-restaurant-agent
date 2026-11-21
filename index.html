@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Voice Restaurant Concierge</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 700px; margin: 40px auto; padding: 20px; background: #0f172a; color: #f8fafc; }
+        .card { background: #1e293b; padding: 24px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+        button { background: #3b82f6; color: white; border: none; padding: 16px 32px; font-size: 18px; border-radius: 50px; cursor: pointer; width: 100%; font-weight: bold; }
+        button.recording { background: #ef4444; animation: pulse 1.2s infinite; }
+        .log { margin-top: 20px; padding: 15px; background: #0f172a; border-radius: 8px; line-height: 1.6; }
+        .badge { display: inline-block; background: #334155; padding: 3px 8px; border-radius: 4px; font-size: 12px; color: #38bdf8; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Multilingual Voice AI Restaurant Agent</h2>
+        <p style="color: #94a3b8;">Powered by Gemma 4 (Local), Faster-Whisper, FastAPI & SQLite</p>
+        <button id="recordBtn">Hold or Click to Speak</button>
+        <div id="status" style="margin-top: 12px; text-align: center; color: #cbd5e1;">Ready</div>
+        <div id="chatLog" class="log"><em>Try asking in Bulgarian or English: "Имате ли италиански ресторант в София?" or "Check allergens for REST-0001 and book a table for 2."</em></div>
+        <audio id="player" hidden></audio>
+    </div>
+
+    <script>
+        let mediaRecorder, audioChunks = [], isRecording = false;
+        const btn = document.getElementById('recordBtn');
+        const status = document.getElementById('status');
+        const log = document.getElementById('chatLog');
+        const player = document.getElementById('player');
+
+        btn.onclick = async () => {
+            if (!isRecording) {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                mediaRecorder.onstop = sendAudio;
+                mediaRecorder.start();
+                isRecording = true;
+                btn.textContent = "Stop & Send";
+                btn.classList.add('recording');
+                status.textContent = "Listening...";
+            } else {
+                mediaRecorder.stop();
+                isRecording = false;
+                btn.textContent = "Click to Speak";
+                btn.classList.remove('recording');
+                status.textContent = "Processing speech & querying Gemma 4...";
+            }
+        };
+
+        async function sendAudio() {
+            const blob = new Blob(audioChunks, { type: 'audio/webm' });
+            const formData = new FormData();
+            formData.append('audio', blob, 'speech.webm');
+
+            const res = await fetch('/voice-chat', { method: 'POST', body: formData });
+            const data = await res.json();
+
+            status.textContent = "Ready";
+            log.innerHTML += `
+                <hr style="border-color: #334155;">
+                <p><strong>You (${data.detected_lang || '?'}):</strong> ${data.user_text}</p>
+                <p><span class="badge">Tool Called: ${data.tool_used}</span></p>
+                <p><strong>AI Agent:</strong> ${data.bot_text}</p>
+            `;
+            player.src = data.audio_url;
+            player.play();
+        }
+    </script>
+</body>
+</html>

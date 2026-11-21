@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Generated data (recreated by setup_db.py / on first start)
+*.db
+*.db-journal
+restaurants_1000.csv
+static/
+
+# Local notes and tooling
+HANDOFF.md
+.vscode/
+.idea/
+.claude/
+.env
+*.log
