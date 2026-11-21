@@ -259,7 +259,7 @@ def main():
     for case in cases:
         marks = "".join({"pass": "✅", "fail": "❌", "error": "⚠️"}[r["outcome"]] for r in results if r["case"] == case.id)
         lines.append(f"| `{case.id}` | {case.note} | {marks} |")
-    with open(os.path.join(RESULTS_DIR, "latest.md"), "w", encoding="utf-8") as f:
+    with open(os.path.join(RESULTS_DIR, "latest.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
     print("\n" + "\n".join(lines))
 
