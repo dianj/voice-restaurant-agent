@@ -135,12 +135,15 @@ def parse_booking_request(restaurant, date_text, time_text, guests):
     return when, start, None
 
 
-def seats_taken(conn, restaurant_id: str, day: str, start: int) -> int:
-    """Guests already seated at `start` (minute of the booking day) by overlapping confirmed reservations."""
+def seats_taken(conn, restaurant_id: str, day: str, start: int, exclude_code: str = "") -> int:
+    """Guests already seated at `start` (minute of the booking day) by overlapping confirmed reservations.
+
+    `exclude_code` leaves out the reservation being changed, so it does not compete with itself.
+    """
     rows = conn.execute(
         "SELECT date, time, guests FROM reservations "
-        "WHERE restaurant_id = ? AND status = 'confirmed' AND date IN (?, ?, ?)",
-        (restaurant_id, day,
+        "WHERE restaurant_id = ? AND status = 'confirmed' AND code != ? AND date IN (?, ?, ?)",
+        (restaurant_id, exclude_code or "", day,
          (date_cls.fromisoformat(day) - timedelta(days=1)).isoformat(),
          (date_cls.fromisoformat(day) + timedelta(days=1)).isoformat()),
     ).fetchall()
@@ -158,7 +161,8 @@ def booking_minute(day: str, when: datetime) -> int:
     return int((when - datetime.combine(date_cls.fromisoformat(day), datetime.min.time())).total_seconds() // 60)
 
 
-def alternative_times(conn, restaurant, day: str, wanted: int, guests: int, limit: int = 3) -> list:
+def alternative_times(conn, restaurant, day: str, wanted: int, guests: int, limit: int = 3,
+                      exclude_code: str = "") -> list:
     """Closest free start times on the same day."""
     opens, closes = opening_window(restaurant["opening_hours"])
     current = now()
@@ -168,7 +172,7 @@ def alternative_times(conn, restaurant, day: str, wanted: int, guests: int, limi
     for start in sorted(candidates, key=lambda m: (abs(m - wanted), m)):
         if start == wanted or base + timedelta(minutes=start) <= current:
             continue
-        if seats_taken(conn, restaurant["restaurant_id"], day, start) + guests <= restaurant["seating_capacity"]:
+        if seats_taken(conn, restaurant["restaurant_id"], day, start, exclude_code) + guests <= restaurant["seating_capacity"]:
             free.append(hhmm(start))
         if len(free) == limit:
             break
@@ -350,8 +354,17 @@ def find_reservation(code: str):
             "FROM reservations r JOIN restaurants s USING (restaurant_id) WHERE r.code = ?", (normalize_code(code),)
         ).fetchone()
     if not row:
-        return error(f"No reservation with code '{code}'. Ask the guest to repeat the code (format R-XXXXX).")
+        return error(NOT_FOUND.format(code=code))
     return result("success", reservation=dict(row))
+
+
+NOT_FOUND = "No reservation with code '{code}'. Ask the guest to repeat the code (format R-XXXXX)."
+WRONG_NAME = "The name does not match this reservation. Ask the guest for the name used when booking."
+
+
+def is_owner(row, customer_name) -> bool:
+    """The booking name works as a simple check that the caller owns the reservation."""
+    return str(customer_name or "").strip().lower() == row["customer_name"].lower()
 
 
 def cancel_reservation(code: str, customer_name: str):
@@ -359,15 +372,73 @@ def cancel_reservation(code: str, customer_name: str):
     with db() as conn:
         row = conn.execute("SELECT customer_name, status FROM reservations WHERE code = ?", (code,)).fetchone()
         if not row:
-            return error(f"No reservation with code '{code}'. Ask the guest to repeat the code (format R-XXXXX).")
-        # The name works as a simple check that the caller owns the booking.
-        if str(customer_name or "").strip().lower() != row["customer_name"].lower():
-            return error("The name does not match this reservation. Ask the guest for the name used when booking.")
+            return error(NOT_FOUND.format(code=code))
+        if not is_owner(row, customer_name):
+            return error(WRONG_NAME)
         if row["status"] == "cancelled":
             return result("success", reservation_code=code, already_cancelled=True)
         conn.execute("UPDATE reservations SET status = 'cancelled', updated_at = ? WHERE code = ?",
                      (now().isoformat(timespec="seconds"), code))
     return result("success", reservation_code=code, cancelled=True)
+
+
+def update_reservation(code: str, customer_name: str, add_note: str = None, date: str = None, time: str = None,
+                       guests: int = None):
+    """Add a note (e.g. an allergy) and/or move the reservation to another date, time or party size."""
+    code = normalize_code(code)
+    if add_note is not None and (not isinstance(add_note, str) or not add_note.strip() or len(add_note) > 200):
+        return error("add_note must be a short text (at most 200 characters).")
+    if add_note is None and date is None and time is None and guests is None:
+        return error("Nothing to change: pass add_note and/or a new date, time or guests.")
+    conn = connect()
+    try:
+        conn.isolation_level = None
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM reservations WHERE code = ?", (code,)).fetchone()
+        if not row:
+            conn.execute("ROLLBACK")
+            return error(NOT_FOUND.format(code=code))
+        if not is_owner(row, customer_name):
+            conn.execute("ROLLBACK")
+            return error(WRONG_NAME)
+        if row["status"] != "confirmed":
+            conn.execute("ROLLBACK")
+            return error("This reservation is cancelled; make a new booking instead.")
+        restaurant = get_restaurant(conn, row["restaurant_id"])
+        new_date, new_time = date or row["date"], time or row["time"]
+        new_guests = guests if guests is not None else row["guests"]
+        changed = {}
+        if (new_date, new_time, new_guests) != (row["date"], row["time"], row["guests"]):
+            when, _, problem = parse_booking_request(restaurant, new_date, new_time, new_guests)
+            if problem:
+                conn.execute("ROLLBACK")
+                return error(problem)
+            day = str(new_date).strip()
+            minute = booking_minute(day, when)
+            if seats_taken(conn, restaurant["restaurant_id"], day, minute, code) + new_guests > restaurant["seating_capacity"]:
+                alternatives = alternative_times(conn, restaurant, day, minute, new_guests, exclude_code=code)
+                conn.execute("ROLLBACK")
+                return result("unavailable", available=False, reservation_code=code, date=day,
+                              time=when.strftime("%H:%M"), guests=new_guests, alternatives=alternatives,
+                              note="The reservation was not changed.")
+            new_values = {"date": when.date().isoformat(), "time": when.strftime("%H:%M"), "guests": new_guests}
+            changed = {k: v for k, v in new_values.items() if v != row[k]}
+        notes = row["notes"]
+        if add_note:
+            notes = f"{notes}; {add_note.strip()}" if notes else add_note.strip()
+            if len(notes) > 300:
+                conn.execute("ROLLBACK")
+                return error("The reservation notes are full (300 characters).")
+        final = {"date": row["date"], "time": row["time"], "guests": row["guests"], **changed}
+        conn.execute(
+            "UPDATE reservations SET date = ?, time = ?, guests = ?, notes = ?, updated_at = ? WHERE code = ?",
+            (final["date"], final["time"], final["guests"], notes, now().isoformat(timespec="seconds"), code),
+        )
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+    return result("success", reservation_code=code, restaurant=restaurant["name"], **final, notes=notes,
+                  updated=sorted(changed) + (["notes"] if add_note else []))
 
 
 def list_reservations(limit: int = 50) -> list:

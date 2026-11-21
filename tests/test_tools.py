@@ -135,3 +135,39 @@ def test_cancelled_reservation_frees_the_seats():
 
 def test_booking_requires_a_name():
     assert "name" in call(tools.book_table, "REST-0001", " ", TOMORROW, "19:00", 2)["message"]
+
+
+# --- Changing a reservation --------------------------------------------------------------
+
+def book_at_10_to_22(name="Alex", time="19:00", guests=2):
+    r = restaurant("seating_capacity = 20 AND opening_hours = '10:00-22:00'")
+    return r["restaurant_id"], call(tools.book_table, r["restaurant_id"], name, TOMORROW, time, guests)["reservation_code"]
+
+
+def test_note_is_appended_only_for_the_owner():
+    _, code = book_at_10_to_22()
+    assert call(tools.update_reservation, code, "Someone Else", add_note="gluten allergy")["status"] == "error"
+    first = call(tools.update_reservation, code, "alex", add_note="gluten allergy")
+    assert first["notes"] == "gluten allergy" and first["updated"] == ["notes"]
+    second = call(tools.update_reservation, code, "Alex", add_note="high chair")
+    assert second["notes"] == "gluten allergy; high chair"
+    assert call(tools.update_reservation, code, "Alex")["status"] == "error"  # nothing to change
+
+
+def test_moving_a_reservation_checks_capacity_without_counting_itself():
+    rid, code = book_at_10_to_22(guests=20)          # the restaurant is full at 19:00
+    moved = call(tools.update_reservation, code, "Alex", time="19:30")  # overlaps only with itself
+    assert moved["status"] == "success" and moved["time"] == "19:30" and moved["updated"] == ["time"]
+
+    call(tools.book_table, rid, "Other", TOMORROW, "12:00", 20)
+    blocked = call(tools.update_reservation, code, "Alex", time="12:30")
+    assert blocked["status"] == "unavailable" and blocked["alternatives"]
+    assert call(tools.find_reservation, code)["reservation"]["time"] == "19:30"  # unchanged
+
+    assert "open" in call(tools.update_reservation, code, "Alex", time="23:00")["message"]
+
+
+def test_cancelled_reservation_cannot_be_changed():
+    _, code = book_at_10_to_22()
+    call(tools.cancel_reservation, code, "Alex")
+    assert "cancelled" in call(tools.update_reservation, code, "Alex", guests=3)["message"]

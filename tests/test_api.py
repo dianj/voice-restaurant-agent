@@ -45,7 +45,8 @@ def test_system_prompt_contains_today_and_all_tools(client, fake_lm):
     request = fake_lm.requests[-1]
     assert "Friday, 2026-11-20" in request["messages"][0]["content"]
     assert {t["function"]["name"] for t in request["tools"]} == {
-        "search_restaurants", "get_menu", "check_availability", "book_table", "find_reservation", "cancel_reservation"}
+        "search_restaurants", "get_menu", "check_availability", "book_table", "find_reservation", "update_reservation",
+        "cancel_reservation"}
 
 
 def test_conversations_are_isolated_per_session(app_url, fake_lm):
@@ -119,3 +120,8 @@ def test_reset_and_empty_message(client, fake_lm):
 def test_health_reports_the_model(client):
     data = client.get("/api/health").json()
     assert data["llm"] == {"reachable": True, "model_available": True}
+
+
+def test_reservation_codes_are_spelled_for_the_voice_only():
+    from restaurant.voice import clean_for_speech
+    assert clean_for_speech("Your code is R-RM952. See you!") == "Your code is R, R, M, 9, 5, 2. See you!"

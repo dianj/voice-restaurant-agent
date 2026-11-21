@@ -3,7 +3,8 @@ import json
 import logging
 
 from .data import ALLERGENS, CUISINES, LOCATIONS
-from .tools import book_table, cancel_reservation, check_availability, find_reservation, get_menu, search_restaurants
+from .tools import (book_table, cancel_reservation, check_availability, find_reservation, get_menu, search_restaurants,
+                    update_reservation)
 
 AREAS = sorted({area for areas in LOCATIONS.values() for area in areas})
 
@@ -17,7 +18,8 @@ TOOLS_SCHEMA = [
             "city": {"type": "string", "enum": list(LOCATIONS)},
             "area": {"type": "string", "enum": AREAS, "description": "Neighbourhood inside the city."},
             "min_rating": {"type": "number", "description": "0-5, e.g. 4.5"},
-            "open_at": {"type": "string", "description": "HH:MM; only restaurants open at that time."},
+            "open_at": {"type": "string", "description": "HH:MM. Use it whenever the guest mentions when they want to "
+                                                       "eat (tonight -> 20:00, at 21:30 -> 21:30, now -> current time)."},
             "limit": {"type": "integer", "description": "1-10, default 5."},
         }},
     }},
@@ -62,6 +64,19 @@ TOOLS_SCHEMA = [
         "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
     }},
     {"type": "function", "function": {
+        "name": "update_reservation",
+        "description": "Change an existing reservation: add a note (allergy, high chair, occasion) and/or move it to "
+                       "another date, time or number of guests. Needs the code and the booking name. Free seats are "
+                       "checked again; if the new slot is full, nothing changes and alternatives are returned.",
+        "parameters": {"type": "object", "properties": {
+            "code": {"type": "string"}, "customer_name": {"type": "string"},
+            "add_note": {"type": "string", "description": "Appended to the existing notes."},
+            "date": {"type": "string", "description": "New date, YYYY-MM-DD."},
+            "time": {"type": "string", "description": "New time, HH:MM."},
+            "guests": {"type": "integer", "description": "New number of guests."},
+        }, "required": ["code", "customer_name"]},
+    }},
+    {"type": "function", "function": {
         "name": "cancel_reservation",
         "description": "Cancel a reservation. Needs the code and the name it was booked under. Confirm with the guest first.",
         "parameters": {"type": "object", "properties": {
@@ -76,6 +91,7 @@ AVAILABLE_FUNCTIONS = {
     "check_availability": check_availability,
     "book_table": book_table,
     "find_reservation": find_reservation,
+    "update_reservation": update_reservation,
     "cancel_reservation": cancel_reservation,
 }
 
