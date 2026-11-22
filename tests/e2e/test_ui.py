@@ -135,8 +135,9 @@ def test_voice_replies_request_tts_in_the_reply_language(page: Page, app_url, fa
 
 def test_header_shows_the_model_status(page: Page, app_url):
     open_app(page, app_url)
-    expect(page.locator("#llmStatus .dot")).to_have_class("dot ok")
-    expect(page.locator("#llmStatus")).to_contain_text("ready")
+    expect(page.locator(".model-picker #llmDot")).to_have_class("dot ok")   # the dot sits in the dropdown
+    expect(page.locator("#llmStatus")).to_have_text("ready")                  # text for screen readers
+    expect(page.locator("#modelSelect")).to_have_attribute("title", "AI model: ready")
 
 
 def test_model_selector_switches_the_model(page: Page, app_url, fake_lm):
@@ -173,3 +174,13 @@ def test_text_size_buttons_scale_the_text_and_are_remembered(page: Page, app_url
         page.get_by_role("button", name="Smaller text").click()
     expect(page.locator("#fontSizeLabel")).to_have_text("12px")      # lower bound
     expect(page.get_by_role("button", name="Smaller text")).to_be_disabled()
+
+
+
+def test_speech_language_choice_is_remembered(page: Page, app_url):
+    open_app(page, app_url)
+    select = page.locator("#speechLanguage")
+    expect(select).to_have_value("auto")
+    select.select_option("bg")
+    page.reload()
+    expect(page.locator("#speechLanguage")).to_have_value("bg")

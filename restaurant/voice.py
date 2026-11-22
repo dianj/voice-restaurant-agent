@@ -1,10 +1,12 @@
 """Voice: local speech-to-text (faster-whisper) and text-to-speech (edge-tts, online)."""
 import asyncio
+import logging
 import re
 import threading
 
 from . import config
 
+log = logging.getLogger("restaurant.voice")
 _whisper_model = None
 _whisper_lock = threading.Lock()
 
@@ -28,16 +30,25 @@ def pick_supported_language(model, audio) -> str:
     try:
         _, _, all_probs = model.detect_language(audio, vad_filter=True)
         probs = dict(all_probs)
-        return max(config.SUPPORTED_LANGUAGES, key=lambda lang: probs.get(lang, 0.0))
+        chosen = max(config.SUPPORTED_LANGUAGES, key=lambda lang: probs.get(lang, 0.0))
+        # Logged so misdetections (e.g. Bulgarian heard as Spanish) can be investigated later.
+        top = sorted(probs.items(), key=lambda item: -item[1])[:3]
+        log.info("Speech language: chose %s; supported %s; top overall %s", chosen,
+                 {lang: round(probs.get(lang, 0.0), 3) for lang in config.SUPPORTED_LANGUAGES},
+                 [(lang, round(p, 3)) for lang, p in top])
+        return chosen
     except Exception:
+        log.exception("Language detection failed; using %s", config.PRIMARY_LANGUAGE)
         return config.PRIMARY_LANGUAGE
 
 
-def transcribe_audio(path: str):
+def transcribe_audio(path: str, language: str = None):
+    """Audio file -> (text, language). A `language` chosen by the guest in the UI skips detection."""
     from faster_whisper import decode_audio
     model = get_whisper_model()
     audio = decode_audio(path)
-    language = pick_supported_language(model, audio)
+    if language not in config.SUPPORTED_LANGUAGES:
+        language = pick_supported_language(model, audio)
     segments, _ = model.transcribe(audio, language=language, vad_filter=True, beam_size=5,
                                    initial_prompt=config.WHISPER_PROMPTS[language])
     text = " ".join(segment.text.strip() for segment in segments).strip()

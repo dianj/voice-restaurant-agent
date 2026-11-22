@@ -20,7 +20,6 @@
     header { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     header h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
     header .sub { color: var(--muted); font-size: 12px; }
-    .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
     .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
     .spacer { flex: 1; }
@@ -32,7 +31,12 @@
     .font-controls { display: inline-flex; align-items: center; gap: 4px; }
     .font-controls .ghost { padding: 3px 9px; font-weight: 700; }
     #fontSizeLabel { min-width: 38px; text-align: center; }
-    .model { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 12px; color: var(--muted); }
+    /* Model picker: the status dot sits inside the dropdown; the status text is for screen readers and the tooltip. */
+    .model-picker { position: relative; display: inline-flex; align-items: center; }
+    .model-picker .dot { position: absolute; left: 10px; pointer-events: none; }
+    .model-picker select { padding-left: 24px; font-size: 13px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    #speechLanguage { height: 52px; flex: none; }
     select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; }
 
     #messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
@@ -92,9 +96,10 @@
                 <div class="sub">Speak or type in English, Bulgarian, German, Spanish, French or Italian</div>
             </div>
             <span class="spacer"></span>
-            <div class="model">
-                <select id="modelSelect" aria-label="AI model" title="Local AI model in LM Studio"><option>Loading…</option></select>
-                <span class="status" id="llmStatus"><span class="dot"></span><span>checking model…</span></span>
+            <div class="model-picker">
+                <span class="dot" id="llmDot" aria-hidden="true"></span>
+                <select id="modelSelect" aria-label="AI model" aria-describedby="llmStatus"><option>Loading…</option></select>
+                <span class="sr-only" id="llmStatus" aria-live="polite">checking model…</span>
             </div>
         </header>
         <div class="controls" style="padding: 10px 20px; border-bottom: 1px solid var(--line);">
@@ -118,6 +123,16 @@
         <div class="examples" id="examples"></div>
         <div id="hint"></div>
         <div class="composer">
+            <select id="speechLanguage" aria-label="Language you speak"
+                    title="Language you speak. Auto-detect guesses it from the recording; pick yours if it guesses wrong.">
+                <option value="auto">Auto-detect</option>
+                <option value="bg">Български</option>
+                <option value="en">English</option>
+                <option value="de">Deutsch</option>
+                <option value="es">Español</option>
+                <option value="fr">Français</option>
+                <option value="it">Italiano</option>
+            </select>
             <button id="mic" type="button" title="Record a voice message" aria-label="Record a voice message">🎤</button>
             <textarea id="input" rows="1" placeholder="e.g. A table for two tomorrow at 19:30, Italian in Sofia Center"></textarea>
             <button id="send" type="button">Send</button>
@@ -277,6 +292,7 @@ mic.onclick = async () => {
         if (blob.size < 1000) { setBusy(false, 'Recording was too short.'); return; }
         const form = new FormData();
         form.append('audio', blob, type.includes('ogg') ? 'speech.ogg' : 'speech.webm');
+        form.append('language', $('speechLanguage').value);   // 'auto' = let Whisper detect it
         postChat(form, 'Listening and thinking…');
     };
     recorder.start();
@@ -344,7 +360,7 @@ $('newChat').onclick = async () => {
     greet();
 };
 
-for (const key of ['voiceReplies', 'voiceGender']) {
+for (const key of ['voiceReplies', 'voiceGender', 'speechLanguage']) {
     const node = $(key);
     const saved = localStorage.getItem(key);
     if (saved !== null) node.type === 'checkbox' ? (node.checked = saved === 'true') : (node.value = saved);
@@ -376,17 +392,21 @@ applyFont(currentFont());
 let models = [], switchPoll = null;
 const modelLabel = (id) => (models.find((m) => m.id === id) || {}).label || id;
 
+// The colour of the dot shows the status; the same text goes to screen readers and the tooltip.
+function setStatus(ok, text) {
+    $('llmDot').className = 'dot ' + (ok ? 'ok' : 'bad');
+    $('llmStatus').textContent = text;
+    $('modelSelect').title = `AI model: ${text}`;
+}
+
 async function checkHealth() {
-    const box = $('llmStatus');
     try {
         const data = await (await fetch('/api/health')).json();
         const ok = data.llm.reachable && data.llm.model_available && !data.switching;
-        box.firstElementChild.className = 'dot ' + (ok ? 'ok' : 'bad');
-        box.lastElementChild.textContent = data.switching ? 'loading model…'
-            : ok ? 'ready' : (data.llm.reachable ? 'model not loaded' : 'LM Studio not reachable');
+        setStatus(ok, data.switching ? 'loading model…'
+            : ok ? 'ready' : (data.llm.reachable ? 'model not loaded' : 'LM Studio not reachable'));
     } catch {
-        box.firstElementChild.className = 'dot bad';
-        box.lastElementChild.textContent = 'server not reachable';
+        setStatus(false, 'server not reachable');
     }
 }
 
@@ -420,8 +440,7 @@ $('modelSelect').onchange = async (event) => {
     const target = event.target.value;
     event.target.disabled = true;
     setBusy(true, `Switching to ${modelLabel(target)}: unloading the current model and loading the new one…`);
-    $('llmStatus').firstElementChild.className = 'dot bad';
-    $('llmStatus').lastElementChild.textContent = 'loading model…';
+    setStatus(false, 'loading model…');
     let data;
     try {
         const form = new FormData();

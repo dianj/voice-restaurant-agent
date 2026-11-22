@@ -100,7 +100,8 @@ async def serve_ui():
 
 
 @app.post("/api/chat")
-async def api_chat(request: Request, message: str = Form(""), audio: UploadFile = File(None)):
+async def api_chat(request: Request, message: str = Form(""), audio: UploadFile = File(None),
+                   language: str = Form("auto")):
     session_id, session = get_session(request)
     spoken_language = None
     text = message.strip()
@@ -114,7 +115,8 @@ async def api_chat(request: Request, message: str = Form(""), audio: UploadFile 
         try:
             tmp.write(raw)
             tmp.close()
-            text, spoken_language = await run_in_threadpool(transcribe_audio, tmp.name)
+            # The guest can fix the speech language in the UI; "auto" lets Whisper detect it.
+            text, spoken_language = await run_in_threadpool(transcribe_audio, tmp.name, language)
         except Exception:
             log.exception("Speech recognition failed")
             return with_cookie({"error": "Speech recognition failed. Please try again or type your message."},

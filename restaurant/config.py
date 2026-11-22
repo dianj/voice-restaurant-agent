@@ -42,7 +42,9 @@ SUPPORTED_LANGUAGES = ("en", "bg", "de", "es", "fr", "it")
 PRIMARY_LANGUAGE = "en"
 WHISPER_PROMPTS = {
     "en": "Restaurant booking: table for two, reservation, tonight, tomorrow, allergens, gluten, menu, vegetarian.",
-    "bg": "Резервация в ресторант: маса за двама, резервация, довечера, утре, алергени, глутен, меню, вегетарианско.",
+    "bg": "Резервация в ресторант: маса за двама, резервация, довечера, утре, алергени, глутен, меню, вегетарианско. "
+          "Ястия: телешко варено, пилешка супа, шкембе чорба, боб чорба, таратор, мусака, сарми, шопска салата, "
+          "кебапчета, баница, каварма.",
     "de": "Restaurantreservierung: Tisch für zwei, heute Abend, morgen, Allergene, Gluten, Speisekarte, vegetarisch.",
     "es": "Reserva de restaurante: mesa para dos, esta noche, mañana, alérgenos, gluten, menú, vegetariano.",
     "fr": "Réservation de restaurant : table pour deux, ce soir, demain, allergènes, gluten, menu, végétarien.",

@@ -153,3 +153,38 @@ def test_chat_waits_while_the_model_is_switching(client, fake_lm):
     data = chat(client, "Маса за двама утре")
     assert data["system_error"] is True and "AI модел" in data["reply"]
     assert fake_lm.requests == []  # the LLM was not called
+
+
+
+def test_chosen_speech_language_is_passed_to_transcription(client, fake_lm, monkeypatch):
+    seen = {}
+
+    def fake_transcribe(path, language=None):
+        seen["language"] = language
+        return "Маса за двама", "bg"
+
+    monkeypatch.setattr(server, "transcribe_audio", fake_transcribe)
+    fake_lm.script(reply="Добре.")
+    data = client.post("/api/chat", data={"language": "bg"},
+                       files={"audio": ("speech.webm", b"x" * 2000, "audio/webm")}).json()
+    assert seen["language"] == "bg"
+    assert data["user_text"] == "Маса за двама" and data["spoken_language"] == "bg"
+
+
+def test_fixed_language_skips_whisper_language_detection(monkeypatch):
+    import faster_whisper
+    from restaurant import voice
+
+    class FakeModel:
+        def detect_language(self, *a, **k):
+            raise AssertionError("detection must be skipped when the guest chose a language")
+
+        def transcribe(self, audio, language, **kwargs):
+            self.kwargs = {"language": language, **kwargs}
+            return [type("Segment", (), {"text": " Здравейте "})()], None
+
+    model = FakeModel()
+    monkeypatch.setattr(voice, "get_whisper_model", lambda: model)
+    monkeypatch.setattr(faster_whisper, "decode_audio", lambda path: "AUDIO")
+    assert voice.transcribe_audio("x.webm", "bg") == ("Здравейте", "bg")
+    assert model.kwargs["language"] == "bg" and "Ястия" in model.kwargs["initial_prompt"]
