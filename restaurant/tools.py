@@ -8,6 +8,7 @@ import random
 import re
 import sqlite3
 from contextlib import contextmanager
+from difflib import SequenceMatcher
 from datetime import date as date_cls, datetime, timedelta
 
 from . import config
@@ -401,12 +402,32 @@ def find_reservation(code: str):
 
 
 NOT_FOUND = "No reservation with code '{code}'. Ask the guest to repeat the code (format R followed by 5 letters/digits, e.g. R34LST)."
-WRONG_NAME = "The name does not match this reservation. Ask the guest for the name used when booking."
+WRONG_NAME = ("The name does not match this reservation. Speech recognition may have misheard it: ask the guest to "
+              "spell the name or type it in the chat. Do not repeat the code or the stored name to the guest. "
+              "If it still does not match, offer to pass the request to a colleague.")
+
+_CYRILLIC_TO_LATIN = dict(zip("абвгдежзийклмнопрстуфхцчшщъьюя",
+                              ["a", "b", "v", "g", "d", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r",
+                               "s", "t", "u", "f", "h", "ts", "ch", "sh", "sht", "a", "", "yu", "ya"]))
+
+
+def name_key(name) -> str:
+    """Lower case, Latin letters only, no spaces: "Хано Споруха", "hano sporuha" and "Хано С Поруха" compare equal."""
+    text = "".join(_CYRILLIC_TO_LATIN.get(ch, ch) for ch in str(name or "").lower())
+    return re.sub(r"[^a-z]", "", text)
 
 
 def is_owner(row, customer_name) -> bool:
-    """The booking name works as a simple check that the caller owns the reservation."""
-    return str(customer_name or "").strip().lower() == row["customer_name"].lower()
+    """The booking name works as a simple check that the caller owns the reservation (the code is the real key).
+
+    Spoken names come back slightly different from turn to turn ("Споруха" at booking, "Спаруха" when
+    cancelling), so one or two misheard letters are tolerated; a different name is not.
+    """
+    given, stored = name_key(customer_name), name_key(row["customer_name"])
+    if len(given) < 2:
+        return False
+    return given == stored or (min(len(given), len(stored)) >= 5
+                               and SequenceMatcher(None, given, stored).ratio() >= 0.85)
 
 
 def cancel_reservation(code: str, customer_name: str):

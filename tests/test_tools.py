@@ -127,6 +127,15 @@ def test_booking_is_saved_and_can_be_found_and_cancelled_by_its_owner():
     assert call(tools.find_reservation, code)["reservation"]["status"] == "cancelled"
 
 
+def test_owner_name_tolerates_speech_recognition_variants_but_not_another_name():
+    row = {"customer_name": "Хано Споруха"}
+    for heard in ("хано спаруха", "Хано с Паруха", "Hano Sporuha", "  ХАНО СПОРУХА. "):
+        assert tools.is_owner(row, heard), heard
+    for other in ("Мария Петрова", "Хано", "", "Иван Споруха"):
+        assert not tools.is_owner(row, other), other
+    assert tools.is_owner({"customer_name": "Ana"}, "ana") and not tools.is_owner({"customer_name": "Ana"}, "Ina")
+
+
 def test_cancelled_reservation_frees_the_seats():
     r = restaurant("seating_capacity = 20 AND opening_hours = '10:00-22:00'")
     rid = r["restaurant_id"]
