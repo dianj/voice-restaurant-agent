@@ -112,7 +112,7 @@ def parse_booking_request(restaurant, date_text, time_text, guests):
         return None, None, "guests must be at least 1."
     if guests > config.MAX_GUESTS:
         return None, None, (f"Online bookings are limited to {config.MAX_GUESTS} guests. "
-                            "Larger groups are handled by the events team: offer to pass the request to a human.")
+                            "Larger groups are handled by the events team: offer a callback (request_callback).")
     try:
         day = date_cls.fromisoformat(str(date_text).strip())
     except ValueError:
@@ -391,20 +391,23 @@ def book_table(restaurant_id: str, customer_name: str, date: str, time: str, gue
 
 
 def find_reservation(code: str):
+    """The guest's name is deliberately left out: anyone who knows (or guesses) a code would otherwise learn whose
+    booking it is, and could then pass the name check for cancelling it. The guest has to say the name."""
     with db() as conn:
         row = conn.execute(
-            "SELECT r.code, r.customer_name, r.date, r.time, r.guests, r.status, r.notes, s.name AS restaurant "
+            "SELECT r.code, r.date, r.time, r.guests, r.status, r.notes, s.name AS restaurant, r.restaurant_id "
             "FROM reservations r JOIN restaurants s USING (restaurant_id) WHERE r.code = ?", (normalize_code(code),)
         ).fetchone()
     if not row:
         return error(NOT_FOUND.format(code=code))
-    return result("success", reservation=dict(row))
+    return result("success", reservation=dict(row),
+                  note="The booking name is not shown. To change or cancel, ask the guest for the name it was booked under.")
 
 
 NOT_FOUND = "No reservation with code '{code}'. Ask the guest to repeat the code (format R followed by 5 letters/digits, e.g. R34LST)."
 WRONG_NAME = ("The name does not match this reservation. Speech recognition may have misheard it: ask the guest to "
               "spell the name or type it in the chat. Do not repeat the code or the stored name to the guest. "
-              "If it still does not match, offer to pass the request to a colleague.")
+              "If it still does not match, offer a callback from a colleague (request_callback).")
 
 _CYRILLIC_TO_LATIN = dict(zip("абвгдежзийклмнопрстуфхцчшщъьюя",
                               ["a", "b", "v", "g", "d", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r",
@@ -417,17 +420,29 @@ def name_key(name) -> str:
     return re.sub(r"[^a-z]", "", text)
 
 
-def is_owner(row, customer_name) -> bool:
-    """The booking name works as a simple check that the caller owns the reservation (the code is the real key).
-
-    Spoken names come back slightly different from turn to turn ("Споруха" at booking, "Спаруха" when
-    cancelling), so one or two misheard letters are tolerated; a different name is not.
-    """
-    given, stored = name_key(customer_name), name_key(row["customer_name"])
+def same_name(given, stored) -> bool:
+    """Spoken names come back slightly different from turn to turn ("Споруха" at booking, "Спаруха" when
+    cancelling), so one or two misheard letters are tolerated; a different name is not."""
+    given, stored = name_key(given), name_key(stored)
     if len(given) < 2:
         return False
     return given == stored or (min(len(given), len(stored)) >= 5
                                and SequenceMatcher(None, given, stored).ratio() >= 0.85)
+
+
+def booking_names(row) -> list:
+    """The name it was booked under, then any names added later (e.g. a colleague who will come instead)."""
+    extra = json.loads(row["extra_names"]) if "extra_names" in row.keys() and row["extra_names"] else []
+    return [row["customer_name"], *extra]
+
+
+def is_owner(row, customer_name) -> bool:
+    """The booking name works as a simple check that the caller owns the reservation (the code is the real key).
+    Any of the reservation's names works."""
+    return any(same_name(customer_name, name) for name in booking_names(row))
+
+
+MAX_EXTRA_NAMES = 3
 
 
 def cancel_reservation(code: str, customer_name: str):
@@ -446,13 +461,19 @@ def cancel_reservation(code: str, customer_name: str):
 
 
 def update_reservation(code: str, customer_name: str, add_note: str = None, date: str = None, time: str = None,
-                       guests: int = None):
-    """Add a note (e.g. an allergy) and/or move the reservation to another date, time or party size."""
+                       guests: int = None, add_name: str = None):
+    """Add a note (e.g. an allergy) or another name, and/or move the reservation to another date, time or party size.
+
+    The name it was booked under is never replaced: an added name is kept next to it, and every change is
+    recorded in the reservation's history, so the staff can see that and how the booking was changed.
+    """
     code = normalize_code(code)
     if add_note is not None and (not isinstance(add_note, str) or not add_note.strip() or len(add_note) > 200):
         return error("add_note must be a short text (at most 200 characters).")
-    if add_note is None and date is None and time is None and guests is None:
-        return error("Nothing to change: pass add_note and/or a new date, time or guests.")
+    if add_name is not None and (not isinstance(add_name, str) or not 2 <= len(add_name.strip()) <= 80):
+        return error("add_name must be a name of 2-80 characters.")
+    if add_note is None and add_name is None and date is None and time is None and guests is None:
+        return error("Nothing to change: pass add_note, add_name and/or a new date, time or guests.")
     conn = connect()
     try:
         conn.isolation_level = None
@@ -486,6 +507,13 @@ def update_reservation(code: str, customer_name: str, add_note: str = None, date
                               note="The reservation was not changed.")
             new_values = {"date": when.date().isoformat(), "time": when.strftime("%H:%M"), "guests": new_guests}
             changed = {k: v for k, v in new_values.items() if v != row[k]}
+        names = booking_names(row)
+        new_name = add_name.strip() if add_name else None
+        if new_name and any(same_name(new_name, name) for name in names):
+            new_name = None  # already on the reservation: nothing to add
+        elif new_name and len(names) > MAX_EXTRA_NAMES:
+            conn.execute("ROLLBACK")
+            return error(f"A reservation can have at most {MAX_EXTRA_NAMES} added names.")
         notes = row["notes"]
         if add_note:
             notes = f"{notes}; {add_note.strip()}" if notes else add_note.strip()
@@ -493,23 +521,90 @@ def update_reservation(code: str, customer_name: str, add_note: str = None, date
                 conn.execute("ROLLBACK")
                 return error("The reservation notes are full (300 characters).")
         final = {"date": row["date"], "time": row["time"], "guests": row["guests"], **changed}
+        stamp = now().isoformat(timespec="seconds")
+        history = json.loads(row["history"] or "[]")
+        history += [{"at": stamp, "change": f"{field}: {row[field]} -> {value}"} for field, value in sorted(changed.items())]
+        if new_name:
+            names.append(new_name)
+            history.append({"at": stamp, "change": f"name added: {new_name}"})
+        if add_note:
+            history.append({"at": stamp, "change": f"note added: {add_note.strip()}"})
         conn.execute(
-            "UPDATE reservations SET date = ?, time = ?, guests = ?, notes = ?, updated_at = ? WHERE code = ?",
-            (final["date"], final["time"], final["guests"], notes, now().isoformat(timespec="seconds"), code),
+            "UPDATE reservations SET date = ?, time = ?, guests = ?, notes = ?, extra_names = ?, history = ?, "
+            "updated_at = ? WHERE code = ?",
+            (final["date"], final["time"], final["guests"], notes, json.dumps(names[1:], ensure_ascii=False),
+             json.dumps(history, ensure_ascii=False), stamp, code),
         )
         conn.execute("COMMIT")
     finally:
         conn.close()
-    return result("success", reservation_code=code, restaurant=restaurant["name"], **final, notes=notes,
-                  updated=sorted(changed) + (["notes"] if add_note else []))
+    fields = {"added_name": new_name} if new_name else {}
+    return result("success", reservation_code=code, restaurant=restaurant["name"], **final, notes=notes, **fields,
+                  updated=sorted(changed) + (["names"] if new_name else []) + (["notes"] if add_note else []))
 
 
 def list_reservations(limit: int = 50) -> list:
     """Staff view: latest reservations (not a tool for the agent)."""
     with db() as conn:
         rows = conn.execute(
-            "SELECT r.code, r.customer_name, r.phone, r.date, r.time, r.guests, r.notes, r.status, r.created_at, "
-            "s.name AS restaurant, s.city, s.area FROM reservations r JOIN restaurants s USING (restaurant_id) "
-            "ORDER BY r.id DESC LIMIT ?", (limit,)
+            "SELECT r.code, r.customer_name, r.extra_names, r.history, r.phone, r.date, r.time, r.guests, r.notes, "
+            "r.status, r.created_at, s.name AS restaurant, s.city, s.area "
+            "FROM reservations r JOIN restaurants s USING (restaurant_id) ORDER BY r.id DESC LIMIT ?", (limit,)
         ).fetchall()
+    return [{**dict(r), "extra_names": json.loads(r["extra_names"]), "history": json.loads(r["history"])} for r in rows]
+
+
+# --- Handing over to a human --------------------------------------------------------------
+
+REQUEST_KINDS = ("event", "large_group", "other")
+PHONE = re.compile(r"\+?[0-9][0-9 ()./-]{5,22}[0-9]")
+EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}")
+
+
+def valid_contact(contact) -> bool:
+    text = str(contact or "").strip()
+    if EMAIL.fullmatch(text):
+        return True
+    return bool(PHONE.fullmatch(text)) and 7 <= sum(ch.isdigit() for ch in text) <= 15
+
+
+def request_callback(kind: str, customer_name: str, contact: str, details: str, date: str = None,
+                     guests: int = None, city: str = None):
+    """Save a request for a colleague to call or email the guest back: events, groups over the online limit,
+    or anything the agent cannot do. This is the only way the agent hands a guest over to a human."""
+    if kind not in REQUEST_KINDS:
+        return error(f"kind must be one of {list(REQUEST_KINDS)}.")
+    if not isinstance(customer_name, str) or not 2 <= len(customer_name.strip()) <= 80:
+        return error("customer_name is required (2-80 characters). Ask the guest for their name.")
+    if not valid_contact(contact):
+        return error("contact must be a phone number or an email address. Ask the guest how a colleague can reach them.")
+    if not isinstance(details, str) or not 5 <= len(details.strip()) <= 500:
+        return error("details must say in a sentence what the request is about (5-500 characters).")
+    day = None
+    if date:
+        try:
+            day = date_cls.fromisoformat(str(date).strip())
+        except ValueError:
+            return error("date must be YYYY-MM-DD.")
+        if day < now().date():
+            return error("That date is in the past.")
+    if guests is not None and (isinstance(guests, bool) or not isinstance(guests, int) or not 1 <= guests <= 1000):
+        return error("guests must be a whole number from 1 to 1000.")
+    if city is not None and (not isinstance(city, str) or len(city.strip()) > 60):
+        return error("city must be a short text.")
+    with db() as conn:
+        cursor = conn.execute(
+            "INSERT INTO requests (kind, customer_name, contact, details, date, guests, city, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (kind, customer_name.strip(), str(contact).strip(), details.strip(), day.isoformat() if day else None,
+             guests, city.strip() if city else None, now().isoformat(timespec="seconds")),
+        )
+    return result("success", request_number=cursor.lastrowid, contact=str(contact).strip(),
+                  note="Saved for the team. Tell the guest a colleague will contact them; do not promise a time.")
+
+
+def list_requests(limit: int = 50) -> list:
+    """Staff view: latest callback requests (not a tool for the agent)."""
+    with db() as conn:
+        rows = conn.execute("SELECT * FROM requests ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     return [dict(r) for r in rows]

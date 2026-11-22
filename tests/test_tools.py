@@ -119,7 +119,8 @@ def test_booking_is_saved_and_can_be_found_and_cancelled_by_its_owner():
     for variant in (code.lower(), f"R-{code[1:]}", " ".join(code), code[1:]):  # typed and spoken variants
         assert call(tools.find_reservation, variant)["reservation"]["code"] == code, variant
     found = call(tools.find_reservation, code)
-    assert found["reservation"]["customer_name"] == "Alex Ivanov"
+    assert "Alex" not in json.dumps(found) and "customer_name" not in found["reservation"]
+    assert found["reservation"]["restaurant_id"] == rid  # so a cancelled booking can be checked and booked again  # the code alone does not reveal who booked
     assert found["reservation"]["notes"] == "gluten allergy"
 
     assert call(tools.cancel_reservation, code, "Someone Else")["status"] == "error"
@@ -164,6 +165,37 @@ def test_note_is_appended_only_for_the_owner():
     second = call(tools.update_reservation, code, "Alex", add_note="high chair")
     assert second["notes"] == "gluten allergy; high chair"
     assert call(tools.update_reservation, code, "Alex")["status"] == "error"  # nothing to change
+
+
+def test_added_name_keeps_the_original_and_the_change_is_recorded():
+    _, code = book_at_10_to_22(name="Ivan Petrov")
+    assert call(tools.update_reservation, code, "Maria", add_name="Maria")["status"] == "error"  # not on it yet
+    added = call(tools.update_reservation, code, "Ivan Petrov", add_name="Мария Георгиева", time="20:00")
+    assert added["added_name"] == "Мария Георгиева" and added["updated"] == ["time", "names"]
+    for name in ("Ivan Petrov", "мария георгиева"):                     # both names manage the booking now
+        assert call(tools.update_reservation, code, name, add_note="window seat")["status"] == "success", name
+    assert "added_name" not in call(tools.update_reservation, code, "Ivan", add_name="Ivan Petrov")  # already on it
+    staff = next(r for r in tools.list_reservations() if r["code"] == code)
+    assert staff["customer_name"] == "Ivan Petrov" and staff["extra_names"] == ["Мария Георгиева"]
+    assert [h["change"] for h in staff["history"]] == [
+        "time: 19:00 -> 20:00", "name added: Мария Георгиева", "note added: window seat", "note added: window seat"]
+    assert "Мария" not in json.dumps(call(tools.find_reservation, code), ensure_ascii=False)  # not revealed by code
+
+
+def test_callback_request_needs_a_name_and_a_way_to_reach_the_guest():
+    ok = call(tools.request_callback, "event", "Иван Петров", "+359 888 123 456", "Детско парти за 25 деца в събота",
+              date="2026-11-28", guests=25, city="Sofia")
+    assert ok["status"] == "success" and ok["request_number"] == 1
+    assert call(tools.request_callback, "other", "Ana", "ana@example.com", "Wants a private room")["status"] == "success"
+    for contact in ("", "call me", "123", "ana@example", "0888 123 456 789 012 345"):
+        assert "contact" in call(tools.request_callback, "event", "Ana", contact, "A party")["message"], contact
+    assert call(tools.request_callback, "party", "Ana", "0888123456", "A party")["status"] == "error"   # unknown kind
+    assert call(tools.request_callback, "event", " ", "0888123456", "A party")["status"] == "error"     # no name
+    assert call(tools.request_callback, "event", "Ana", "0888123456", "A party", date="2026-11-01")["status"] == "error"
+    saved = tools.list_requests()
+    assert [(q["customer_name"], q["kind"], q["status"]) for q in saved] == [("Ana", "other", "open"),
+                                                                             ("Иван Петров", "event", "open")]
+    assert saved[1]["guests"] == 25 and saved[1]["date"] == "2026-11-28"
 
 
 def test_moving_a_reservation_checks_capacity_without_counting_itself():

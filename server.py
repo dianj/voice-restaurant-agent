@@ -21,7 +21,7 @@ from restaurant import config
 from restaurant.agent import llm_client, run_llm_turn, trim_history
 from restaurant.data import ensure_database
 from restaurant.lmstudio import ensure_default_model_on_startup, list_available_models, model_state, switch_model
-from restaurant.tools import list_reservations
+from restaurant.tools import list_requests, list_reservations
 from restaurant.voice import clean_for_speech, detect_text_language, synthesize_speech, transcribe_audio
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -58,12 +58,13 @@ MODEL_SWITCHING = {
     "bg": "Момент, моля: асистентът превключва към друг AI модел. Опитайте отново след минута.",
 }
 TECHNICAL_PROBLEM = {
-    "en": "Sorry, I have a technical problem right now. Let me transfer you to a colleague.",
-    "bg": "Извинете, в момента имам технически проблем. Ще ви свържа с колега.",
-    "de": "Entschuldigung, ich habe gerade ein technisches Problem. Ich verbinde Sie mit einem Kollegen.",
-    "es": "Lo siento, tengo un problema técnico. Le paso con un compañero.",
-    "fr": "Désolé, j'ai un problème technique. Je vous passe un collègue.",
-    "it": "Mi scusi, ho un problema tecnico. La passo a un collega.",
+    # Nothing is promised here: when the model is down, no one can take a callback request either.
+    "en": "Sorry, I have a technical problem right now. Please try again in a few minutes.",
+    "bg": "Извинете, в момента имам технически проблем. Моля, опитайте отново след няколко минути.",
+    "de": "Entschuldigung, ich habe gerade ein technisches Problem. Bitte versuchen Sie es in ein paar Minuten erneut.",
+    "es": "Lo siento, tengo un problema técnico. Por favor, inténtelo de nuevo en unos minutos.",
+    "fr": "Désolé, j'ai un problème technique. Veuillez réessayer dans quelques minutes.",
+    "it": "Mi scusi, ho un problema tecnico. Riprovi tra qualche minuto.",
 }
 
 
@@ -196,7 +197,7 @@ async def api_reset(request: Request):
 
 @app.get("/api/reservations")
 def api_reservations():
-    return {"reservations": list_reservations()}
+    return {"reservations": list_reservations(), "requests": list_requests()}
 
 
 @app.get("/api/health")

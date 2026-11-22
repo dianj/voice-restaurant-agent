@@ -243,11 +243,41 @@ CREATE TABLE reservations (
     time TEXT NOT NULL,
     guests INTEGER NOT NULL CHECK (guests > 0),
     notes TEXT,
+    extra_names TEXT NOT NULL DEFAULT '[]',
+    history TEXT NOT NULL DEFAULT '[]',
     status TEXT NOT NULL CHECK (status IN ('confirmed', 'cancelled')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 CREATE INDEX idx_reservations_slot ON reservations (restaurant_id, date, status);
+
+CREATE TABLE IF NOT EXISTS requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK (kind IN ('event', 'large_group', 'other')),
+    customer_name TEXT NOT NULL,
+    contact TEXT NOT NULL,
+    details TEXT NOT NULL,
+    date TEXT,
+    guests INTEGER,
+    city TEXT,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
+    created_at TEXT NOT NULL
+);
+"""
+
+# Callback requests for a human colleague (events, groups over the online limit, anything the agent cannot do).
+REQUESTS_SCHEMA = """CREATE TABLE IF NOT EXISTS requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK (kind IN ('event', 'large_group', 'other')),
+    customer_name TEXT NOT NULL,
+    contact TEXT NOT NULL,
+    details TEXT NOT NULL,
+    date TEXT,
+    guests INTEGER,
+    city TEXT,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -316,7 +346,8 @@ def build_database(path: str = None, csv_path: str = None) -> dict:
     conn = sqlite3.connect(path)
     try:
         with conn:
-            conn.executescript("DROP TABLE IF EXISTS reservations; DROP TABLE IF EXISTS menu_items; DROP TABLE IF EXISTS restaurants;")
+            conn.executescript("DROP TABLE IF EXISTS requests; DROP TABLE IF EXISTS reservations; "
+                               "DROP TABLE IF EXISTS menu_items; DROP TABLE IF EXISTS restaurants;")
             conn.executescript(SCHEMA)
             columns = list(restaurants[0])
             conn.executemany(
@@ -355,3 +386,15 @@ def ensure_database():
         current = False
     if not current:
         build_database()
+        return
+    # Columns added later are added in place, so existing reservations are kept.
+    conn = sqlite3.connect(config.DB_PATH)
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(reservations)")}
+        for column in ("extra_names", "history"):
+            if column not in columns:
+                conn.execute(f"ALTER TABLE reservations ADD COLUMN {column} TEXT NOT NULL DEFAULT '[]'")
+        conn.executescript(REQUESTS_SCHEMA)
+        conn.commit()
+    finally:
+        conn.close()

@@ -64,7 +64,7 @@ def test_system_prompt_contains_today_and_all_tools(client, fake_lm):
     assert "Friday, 2026-11-20" in request["messages"][0]["content"]
     assert {t["function"]["name"] for t in request["tools"]} == {
         "search_restaurants", "get_menu", "check_availability", "book_table", "find_reservation", "update_reservation",
-        "cancel_reservation"}
+        "cancel_reservation", "request_callback"}
 
 
 def test_conversations_are_isolated_per_session(app_url, fake_lm):
@@ -81,7 +81,7 @@ def test_llm_outage_returns_a_safe_message_and_keeps_history_clean(client, fake_
     fake_lm.fail_count = agent.llm_client.max_retries + 1
     data = chat(client, "Book a table")
     assert data["system_error"] is True
-    assert "colleague" in data["reply"]
+    assert "try again" in data["reply"]  # nothing promised
     assert "500" not in data["reply"] and "outage" not in data["reply"]  # no internal details
     history = next(iter(server.sessions.values()))["history"]
     assert history == []  # the failed turn left nothing behind
@@ -112,7 +112,20 @@ def test_tool_loop_is_capped(client, fake_lm):
     fake_lm.script_tool_loop("search_restaurants", {"city": "Sofia"}, rounds=config.MAX_TOOL_ROUNDS + 1)
     data = chat(client, "Search forever")
     assert len(data["tool_calls"]) == config.MAX_TOOL_ROUNDS + 1
-    assert "colleague" in data["reply"]
+    assert "try again" in data["reply"]  # nothing promised
+
+
+def test_callback_request_from_the_agent_shows_up_for_the_staff(client, fake_lm):
+    fake_lm.script(("request_callback", {"kind": "event", "customer_name": "Ivan Petrov", "contact": "0888 123 456",
+                                         "details": "Children's party, about 25 kids, Saturday afternoon",
+                                         "guests": 25, "city": "Sofia"}),
+                   reply="Done. A colleague will contact you.")
+    data = chat(client, "Yes, please pass it on")
+    assert data["tool_calls"][0]["status"] == "success"
+    staff = client.get("/api/reservations").json()
+    assert staff["reservations"] == []
+    assert [(q["customer_name"], q["contact"], q["kind"], q["guests"]) for q in staff["requests"]] == [
+        ("Ivan Petrov", "0888 123 456", "event", 25)]
 
 
 def test_history_is_trimmed_only_at_user_turns():

@@ -3,8 +3,8 @@ import json
 import logging
 
 from .data import ALLERGENS, CUISINES, LOCATIONS
-from .tools import (book_table, cancel_reservation, check_availability, find_reservation, get_menu, search_restaurants,
-                    update_reservation)
+from .tools import (book_table, cancel_reservation, check_availability, find_reservation, get_menu, request_callback,
+                    search_restaurants, update_reservation)
 
 AREAS = sorted({area for areas in LOCATIONS.values() for area in areas})
 
@@ -69,21 +69,42 @@ TOOLS_SCHEMA = [
     }},
     {"type": "function", "function": {
         "name": "find_reservation",
-        "description": "Look up a reservation by its code (e.g. R34LST).",
+        "description": "Look up a reservation by its code (e.g. R34LST). The booking name is not returned: "
+                       "ask the guest for it before changing or cancelling.",
         "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
     }},
     {"type": "function", "function": {
         "name": "update_reservation",
-        "description": "Change an existing reservation: add a note (allergy, high chair, occasion) and/or move it to "
-                       "another date, time or number of guests. Needs the code and the booking name. Free seats are "
-                       "checked again; if the new slot is full, nothing changes and alternatives are returned.",
+        "description": "Change an existing reservation: add a note (allergy, high chair, occasion), add another "
+                       "name, and/or move it to another date, time or number of guests. Needs the code and a name "
+                       "already on the booking. Free seats are checked again; if the new slot is full, nothing "
+                       "changes and alternatives are returned.",
         "parameters": {"type": "object", "properties": {
             "code": {"type": "string"}, "customer_name": {"type": "string"},
             "add_note": {"type": "string", "description": "Appended to the existing notes."},
             "date": {"type": "string", "description": "New date, YYYY-MM-DD."},
             "time": {"type": "string", "description": "New time, HH:MM."},
             "guests": {"type": "integer", "description": "New number of guests."},
+            "add_name": {"type": "string", "description": "Another person the table is also under, e.g. a colleague "
+                                                          "who will come instead. The original name stays on the "
+                                                          "booking; a name cannot be removed or replaced."},
         }, "required": ["code", "customer_name"]},
+    }},
+    {"type": "function", "function": {
+        "name": "request_callback",
+        "description": "Hand the guest over to a human: save a request for a colleague to contact them. Use it for "
+                       "events and parties, groups over 20, and anything you cannot do yourself. Collect the name, "
+                       "a phone number or email and what it is about, read them back, and call this only after the "
+                       "guest says yes. Until it succeeds, never say the request was passed on.",
+        "parameters": {"type": "object", "properties": {
+            "kind": {"type": "string", "enum": ["event", "large_group", "other"]},
+            "customer_name": {"type": "string"},
+            "contact": {"type": "string", "description": "Phone number or email address, as the guest gave it."},
+            "details": {"type": "string", "description": "One or two sentences in the guest's language: what, where, when."},
+            "date": {"type": "string", "description": "YYYY-MM-DD, if the guest gave one."},
+            "guests": {"type": "integer", "description": "Number of people, if known."},
+            "city": {"type": "string"},
+        }, "required": ["kind", "customer_name", "contact", "details"]},
     }},
     {"type": "function", "function": {
         "name": "cancel_reservation",
@@ -101,6 +122,7 @@ AVAILABLE_FUNCTIONS = {
     "book_table": book_table,
     "find_reservation": find_reservation,
     "update_reservation": update_reservation,
+    "request_callback": request_callback,
     "cancel_reservation": cancel_reservation,
 }
 

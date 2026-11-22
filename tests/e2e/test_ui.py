@@ -2,6 +2,8 @@
 
 The LLM is the scripted fake from tests/fake_lmstudio.py and the clock is frozen, so each test is deterministic.
 """
+import json
+
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -116,7 +118,7 @@ def test_llm_outage_shows_a_friendly_error(page: Page, app_url, fake_lm):
     open_app(page, app_url)
     send(page, "Book a table")
     expect(last_bot(page)).to_have_class("msg bot error")
-    expect(last_bot(page)).to_contain_text("colleague")
+    expect(last_bot(page)).to_contain_text("try again")
 
 
 def test_voice_replies_request_tts_in_the_reply_language(page: Page, app_url, fake_lm):
@@ -166,7 +168,7 @@ def test_text_size_buttons_scale_the_text_and_are_remembered(page: Page, app_url
     expect(page.locator("#fontSizeLabel")).to_have_text("20px")
     expect(message).to_have_css("font-size", "20px")
     expect(page.locator("#input")).to_have_css("font-size", "20px")
-    expect(page.locator("table")).to_have_css("font-size", "17px")   # staff view scales too
+    expect(page.locator("table").first).to_have_css("font-size", "17px")   # staff view scales too
 
     page.reload()                                                     # remembered per browser
     expect(page.locator(".msg.bot").first).to_have_css("font-size", "20px")
@@ -178,6 +180,47 @@ def test_text_size_buttons_scale_the_text_and_are_remembered(page: Page, app_url
     expect(page.locator("#fontSizeLabel")).to_have_text("12px")      # lower bound
     expect(page.get_by_role("button", name="Smaller text")).to_be_disabled()
 
+
+
+def test_staff_view_shows_added_names_and_changes(page: Page, app_url, fake_lm):
+    rid, _ = restaurant_10_to_22()
+    code = json.loads(tools.book_table(rid, "Ivan", "2026-11-21", "19:00", 2))["reservation_code"]
+    tools.update_reservation(code, "Ivan", add_name="Maria", time="20:00")
+    open_app(page, app_url)
+    row = page.locator("#reservations tr").first
+    expect(row).to_contain_text("also: Maria")
+    expect(row.locator(".badge.changed")).to_have_text("changed")
+    expect(row).to_contain_text("time: 19:00 → 20:00")
+
+
+def test_typing_indicator_shows_while_the_agent_works(page: Page, app_url, fake_lm):
+    fake_lm.script(reply="Here you go.")
+    open_app(page, app_url)
+    page.evaluate("""() => {
+        const original = window.fetch;
+        window.releaseChat = null;
+        window.fetch = (url, opts) => url === '/api/chat'
+            ? new Promise((resolve) => { window.releaseChat = () => resolve(original(url, opts)); })
+            : original(url, opts);
+    }""")
+    send(page, "Hello")
+    typing = page.locator(".msg.typing")
+    expect(typing).to_be_visible()
+    expect(typing).to_contain_text("The agent is thinking")
+    page.evaluate("() => window.releaseChat()")
+    expect(last_bot(page)).to_contain_text("Here you go.")
+    expect(typing).to_have_count(0)
+
+
+def test_staff_view_lists_callback_requests(page: Page, app_url):
+    open_app(page, app_url)
+    expect(page.locator("#requests")).to_contain_text("No callback requests")
+    tools.request_callback("event", "Ivan Petrov", "0888 123 456", "Children's party for 25", guests=25, city="Sofia")
+    page.reload()
+    row = page.locator("#requests tr").first
+    expect(row).to_contain_text("Ivan Petrov")
+    expect(row).to_contain_text("0888 123 456")
+    expect(row).to_contain_text("Event · 25 people · Sofia")
 
 
 def test_speech_language_choice_is_remembered(page: Page, app_url):

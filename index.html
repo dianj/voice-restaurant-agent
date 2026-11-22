@@ -83,6 +83,7 @@
     .staff { display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
     .staff header h2 { font-size: 16px; margin: 0; }
     .tablewrap { overflow: auto; flex: 1; padding: 0 20px 20px; }
+    .table-title { font-size: 14px; margin: 26px 8px 4px; color: var(--muted); font-weight: 600; }
     table { width: 100%; border-collapse: collapse; font-size: calc(var(--fs) - 3px); }
     th { text-align: left; color: var(--muted); font-weight: 600; padding: 12px 8px; position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--line); }
     td { padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -92,6 +93,7 @@
     @keyframes flash { from { background: rgba(232,163,61,.25); } to { background: transparent; } }
     .badge { font-size: calc(var(--fs) - 5px); padding: 2px 7px; border-radius: 999px; background: rgba(95,179,122,.15); color: var(--ok); }
     .badge.cancelled { background: rgba(224,108,90,.15); color: var(--bad); }
+    .badge.changed { background: rgba(230,180,80,.15); color: var(--accent); margin-left: 4px; }
     tr.cancelled td:not(:last-child) { opacity: .5; text-decoration: line-through; }
     .empty { color: var(--muted); padding: 30px 8px; text-align: center; }
     @media (max-width: 900px) { .app { grid-template-columns: 1fr; height: auto; } .chat { height: 100vh; } }
@@ -160,6 +162,11 @@
             <table>
                 <thead><tr><th>Code</th><th>Guest</th><th>Restaurant</th><th>When</th><th>Guests</th><th>Status</th></tr></thead>
                 <tbody id="reservations"></tbody>
+            </table>
+            <h3 class="table-title">Callback requests</h3>
+            <table>
+                <thead><tr><th>#</th><th>Guest</th><th>Contact</th><th>Request</th><th>Received</th></tr></thead>
+                <tbody id="requests"></tbody>
             </table>
         </div>
     </section>
@@ -349,6 +356,7 @@ async function speak(text, language) {
 async function loadReservations() {
     let data;
     try { data = await (await fetch('/api/reservations')).json(); } catch { return; }
+    renderRequests(data.requests || []);
     const body = $('reservations');
     body.replaceChildren();
     if (!data.reservations.length) {
@@ -361,15 +369,46 @@ async function loadReservations() {
         const row = el('tr', r.status === 'cancelled' ? 'cancelled' : '');
         if (knownCodes.size && !knownCodes.has(r.code)) row.classList.add('fresh');
         const guest = el('td', '', r.customer_name);
+        if (r.extra_names.length) guest.append(el('small', '', 'also: ' + r.extra_names.join(', ')));
         if (r.notes) guest.append(el('small', '', r.notes));
         const place = el('td', '', r.restaurant);
         place.append(el('small', '', `${r.area}, ${r.city}`));
         const status = el('td');
         status.append(el('span', 'badge ' + r.status, r.status));
+        if (r.history.length) {
+            const changed = el('span', 'badge changed', 'changed');
+            changed.title = r.history.map((h) => `${h.at.replace('T', ' ').slice(0, 16)}  ${h.change}`).join('\n');
+            status.append(changed);
+            for (const h of r.history) status.append(el('small', '', h.change.replace(' -> ', ' → ')));
+        }
         row.append(el('td', 'code', r.code), guest, place, el('td', '', `${r.date} ${r.time}`), el('td', '', String(r.guests)), status);
         body.append(row);
     }
     knownCodes = new Set(data.reservations.map((r) => r.code));
+}
+
+const KIND_LABELS = { event: 'Event', large_group: 'Large group', other: 'Other' };
+let knownRequests = null;
+
+function renderRequests(requests) {
+    const body = $('requests');
+    body.replaceChildren();
+    if (!requests.length) {
+        const row = el('tr'); const cell = el('td', 'empty', 'No callback requests.');
+        cell.colSpan = 5; row.append(cell); body.append(row);
+    }
+    for (const q of requests) {
+        const row = el('tr');
+        if (knownRequests && !knownRequests.has(q.id)) row.classList.add('fresh');
+        const what = el('td', '', q.details);
+        const facts = [KIND_LABELS[q.kind] || q.kind, q.guests ? `${q.guests} people` : '', q.date || '', q.city || '']
+            .filter(Boolean).join(' · ');
+        what.append(el('small', '', facts));
+        row.append(el('td', 'code', String(q.id)), el('td', '', q.customer_name), el('td', '', q.contact), what,
+                   el('td', '', q.created_at.replace('T', ' ').slice(0, 16)));
+        body.append(row);
+    }
+    knownRequests = new Set(requests.map((q) => q.id));
 }
 
 // --- Setup ---
