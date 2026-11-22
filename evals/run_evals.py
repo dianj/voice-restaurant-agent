@@ -81,6 +81,16 @@ def unsafe_dishes(restaurant_id, allergen):
     return [r["dish_name"] for r in rows if allergen in r["allergens"]]
 
 
+def menu_names(restaurant_id, language):
+    with tools.db() as conn:
+        rows = conn.execute("SELECT names FROM menu_items WHERE restaurant_id = ?", (restaurant_id,)).fetchall()
+    return [json.loads(r["names"])[language] for r in rows]
+
+
+def cheapest(**filters):
+    return json.loads(tools.search_restaurants(sort_by="price", limit=1, **filters))["restaurants"][0]["name"]
+
+
 def book(name="Maria", restaurant=MARBLE, time_="19:00", guests=2):
     return json.loads(tools.book_table(restaurant[0], name, TOMORROW, time_, guests))["reservation_code"]
 
@@ -156,9 +166,7 @@ CASES = [
          lambda r: one_booking(r, restaurant=MARBLE[1], date=TOMORROW, time="19:30", guests=2, customer_name="Maria")
          and reservations(r)[0]["code"] in r["reply"],
          "books after the guest confirms and gives the code exactly as stored",
-         history=(("user", "Book a table for 2 at Marble Hearth tomorrow at 19:30 under the name Maria."),
-                  ("assistant", "A table for 2 at Marble Hearth on 2026-11-21 at 19:30 under the name Maria is "
-                                "available. Shall I book it?"))),
+         lead_in=("Book a table for 2 at Marble Hearth tomorrow at 19:30 under the name Maria.",)),
     Case("time-as-digits", "Маса за двама в Marble Hearth утре в 19:30, на името на Мария.",
          lambda r: "19:30" in r["reply"] and not mentions(r["reply"], "девет", "седем и половина", "половин"),
          "reads the time back as 19:30, not in words (a real bug found in testing)"),
@@ -175,6 +183,15 @@ CASES = [
          "groups over 20 go to a human"),
 
     # --- menu and allergens ---
+    Case("menu-in-guest-language-bg", "Какво има в менюто на Olive Fork?",
+         lambda r: any(a.get("language") == "bg" for a in calls(r, "get_menu"))
+         and sum(n.lower() in r["reply"].lower() for n in menu_names(OLIVE[0], "bg")) >= 2  # "телешко варено" mid-sentence
+         and not any(n.lower() in r["reply"].lower() for n in menu_names(OLIVE[0], "en") if n not in menu_names(OLIVE[0], "bg")),
+         "dish names in Bulgarian from the data, not English (asked for after a live test)"),
+    Case("cheapest-by-price", "Which is the cheapest Italian restaurant in Sofia?",
+         lambda r: cheapest(cuisine="Italian", city="Sofia") in r["reply"]
+         and "$" not in r["reply"] and mentions(r["reply"], "€", "eur"),
+         "names the cheapest by price per person, in euros, never '$' (was 'price class $')"),
     Case("allergen-gluten", "I'm allergic to gluten. What can I eat at Marble Hearth?",
          lambda r: any("gluten" in (a.get("avoid_allergens") or []) for a in calls(r, "get_menu"))
          and not any(d in r["reply"] for d in unsafe_dishes(MARBLE[0], "gluten"))

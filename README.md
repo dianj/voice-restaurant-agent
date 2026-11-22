@@ -16,12 +16,14 @@ The LLM runs locally in LM Studio and works only through validated tools: it can
 
 | Area | Details |
 |---|---|
-| **Input** | Text, or voice through the browser microphone → local faster-whisper (`large-v3-turbo`). Language detection is limited to the six supported languages, so short Bulgarian clips are not mislabelled as Russian. |
-| **Search** | By name, cuisine, city, area, minimum rating and "open at" time (handles places open past midnight). 1,000 restaurants, sorted by rating, unrated last. |
-| **Menu & allergens** | Every restaurant has a menu with the 14 EU-declared allergens. Everyday words ("dairy", "wheat", "shellfish") map to them. The agent names safe dishes and reminds the guest to tell the staff. |
+| **Input** | Text, or voice through the browser microphone → local faster-whisper (`large-v3-turbo`). Language detection is limited to the six supported languages, and the guest can fix their language next to the microphone when detection guesses wrong. |
+| **Search** | By name, cuisine, city, area, minimum rating, budget and "open at" time (handles places open past midnight). 1,000 restaurants, sorted by rating or by price. Each has a typical price per person in euros, computed from its menu. |
+| **Menu & allergens** | Every restaurant has a menu with the 14 EU-declared allergens. Dish and allergen names are stored in all six languages (Шопска салата, Schopska-Salat, …; целина, Sellerie, …), so menus are read in the guest's language without the model translating them. Everyday words ("dairy", "wheat", "shellfish") map to them. The agent names safe dishes and reminds the guest to tell the staff. |
 | **Booking rules** | Opening hours and last seating, no past dates, at most 60 days ahead, 1–20 guests (bigger groups go to a human), 2-hour sittings that block seats, nearest free times when full. Write lock (`BEGIN IMMEDIATE`) so parallel bookings cannot overbook. Codes like `R34LST` avoid characters that look or sound alike, and the voice spells them out. |
-| **Conversation** | Checks availability, reads the details back and books only after the guest confirms. Before booking it only says a table is *available*. Changing (time, party size, allergy notes) or cancelling needs the code and the booking name. Today's date is in the prompt, so "tomorrow" or "on Friday" resolve correctly. |
+| **Conversation** | Checks availability, reads the details back and books only after the guest confirms; this is enforced in code, not only asked of the model. Before booking it only says a table is *available*. Changing (time, party size, allergy notes) or cancelling needs the code and the booking name; the name check tolerates a misheard letter or two and Latin vs Cyrillic spelling, since speech recognition rarely hears a name the same way twice. Today's date is in the prompt, so "tomorrow" or "on Friday" resolve correctly. |
 | **Voice output** | edge-tts with a male or female voice per language (online Microsoft service). |
+| **Models** | Switch between Gemma 4 26B and Qwen 3.8 27B in the UI. Only one fits in GPU memory, so the app unloads one and loads the other through the LM Studio REST API, and never while a guest is waiting for a reply. |
+| **Accessibility** | A− / A+ text size (12–24 px) for the conversation and the staff view, remembered per browser. |
 | **Robustness** | Per-browser sessions, bounded history, one turn at a time per session. A failed LLM call leaves no half-finished tool exchange. Internal errors are logged and never shown to the guest. |
 
 ## Quick start
@@ -38,13 +40,13 @@ Environment variables: `LLM_BASE_URL`, `LLM_MODEL`, `WHISPER_MODEL`, `RESTAURANT
 
 ## Testing
 
-**36 deterministic tests, about 9 s, no GPU.** A scripted fake of LM Studio (`tests/fake_lmstudio.py`) replaces the model and the clock is frozen. CI runs them on every push.
+**51 deterministic tests, about 11 s, no GPU.** A scripted fake of LM Studio (`tests/fake_lmstudio.py`) replaces the model and the clock is frozen. CI runs them on every push.
 
 | Suite | What it covers |
 |---|---|
-| `tests/test_tools.py` (15) | Booking rules (hours, last seating, past dates, 2-hour overlaps, alternatives), changes that do not count the booking itself, ownership checks, search, allergen filtering, deterministic data |
-| `tests/test_api.py` (11) | Full turns over HTTP, session isolation, recovery from an LLM outage, internal errors hidden from the guest, tool-loop limit, history trimming |
-| `tests/e2e/test_ui.py` (10, Playwright) | Tool chips, model output rendered as text (XSS), staff view after booking and cancelling, new conversation, outage message, TTS language |
+| `tests/test_tools.py` (21) | Booking rules (hours, last seating, past dates, 2-hour overlaps, alternatives), changes that do not count the booking itself, ownership checks (including misheard names), search and price sorting, allergen filtering, menus and allergens per language, deterministic data |
+| `tests/test_api.py` (17) | Full turns over HTTP, booking refused without the guest's yes, session isolation, recovery from an LLM outage, internal errors hidden from the guest, tool-loop limit, history trimming, model switching, the chosen speech language |
+| `tests/e2e/test_ui.py` (13, Playwright) | Tool chips, model output rendered as text (XSS), staff view after booking and cancelling, new conversation, outage message, TTS language, model selector and status, text size, speech language |
 
 ```bash
 pip install -r requirements-dev.txt
@@ -52,13 +54,14 @@ python -m playwright install chromium     # or, on Windows with Edge: add --brow
 python -m pytest
 ```
 
-**LLM evals: does the real model behave?** `python evals/run_evals.py --repeat 2` runs 20 conversations in English, Bulgarian and German against the model in LM Studio, each on fresh data, graded on the reservations in the database, the tool calls and the reply.
+**LLM evals: does the real model behave?** `python evals/run_evals.py` runs 23 conversations in English, Bulgarian and German against the model in LM Studio, each on fresh data, graded on the reservations in the database, the tool calls and the reply.
 
-| Model | Passed | Median time per turn |
+| Model (local, LM Studio) | Passed | Median time per turn |
 |---|---|---|
-| Gemma 4 26B A4B | **40/40** (20 cases × 2 runs) | 7.1 s |
+| Gemma 4 26B A4B (default) | **46/46** (23 cases × 2 runs) | 6.0 s |
+| Qwen 3.8 27B | **45/46** (23 cases × 2 runs) | 23.7 s |
 
-Writing the evals found real problems, now fixed: a guest naming a restaurant left the agent without its ID (search by name added); Gemma dropped the dash when reading back a code like `R-34LST` (codes have no dash now); and late at night Gemma told guests "I confirm your reservation" before booking anything (a prompt rule, checked by an eval that failed 2 of 4 runs before the fix and 0 of 4 after). An earlier live test also caught 19:30 being read back as "half past nine". Per-case results: [`evals/results/latest.md`](evals/results/latest.md).
+Writing the evals found real problems, now fixed: a guest naming a restaurant left the agent without its ID (search by name added); Gemma dropped the dash when reading back a code like `R-34LST` (codes have no dash now); late at night Gemma told guests "I confirm your reservation" before booking anything (a prompt rule, checked by an eval that failed 2 of 4 runs before the fix and 0 of 4 after); Qwen sometimes translated restaurant names ("Стар Мил" for "Old Mill"), which a guest could not find; and after a longer prompt Gemma booked straight away when a guest said "Book a table…" (2 of 2 runs), so the confirmation rule moved into code: `book_table` only runs for details that `check_availability` offered in an earlier turn. An earlier live test also caught 19:30 being read back as "half past nine". Per-case results: [`evals/results/latest.md`](evals/results/latest.md).
 
 ## Project layout
 

@@ -19,7 +19,8 @@ The demo database is created on first start. `python setup_db.py` rebuilds it an
 | Variable | Default |
 |---|---|
 | `LLM_BASE_URL` | `http://localhost:1235/v1` |
-| `LLM_MODEL` | `gemma-4-26b-a4b-it` |
+| `LLM_MODEL` | `gemma-4-26b-a4b-it` (default; the UI can switch to `qwen3.8-27b`) |
+| `LLM_CONTEXT_LENGTH` | `16384` (used when the app loads a model) |
 | `WHISPER_MODEL` | `large-v3-turbo` |
 | `RESTAURANT_DB_PATH` | `restaurant_agent.db` in the project root |
 
@@ -35,6 +36,7 @@ The demo database is created on first start. `python setup_db.py` rebuilds it an
 | `restaurant/tools.py` | The seven tools and the booking rules |
 | `restaurant/registry.py` | Tool schemas sent to the model; `execute_tool_call` never raises |
 | `restaurant/agent.py` | System prompt with today's date, tool-calling loop, history trimming |
+| `restaurant/lmstudio.py` | LM Studio model list, load, unload and switch |
 | `restaurant/voice.py` | faster-whisper STT with a restricted language pick, text language detection, edge-tts |
 | `index.html` | Single page, vanilla JS: conversation pane and staff view |
 | `setup_db.py` | Rebuilds the database and exports `restaurants_1000.csv` |
@@ -62,7 +64,8 @@ Dependencies go one way: `server` → `agent` → `registry` → `tools` → `da
 | `POST /api/tts` | Reply text → MP3 (`language`, `gender`) |
 | `POST /api/reset` | Clear this session's history |
 | `GET /api/reservations` | Staff view (latest 50) |
-| `GET /api/health` | Is LM Studio reachable and the model loaded |
+| `GET /api/health` | Is LM Studio reachable, the active model loaded, a switch running |
+| `GET /api/models` · `POST /api/model` | List the models; switch the loaded model |
 
 **Sessions:** a cookie (`restaurant_session`) maps to `{history, lock}` in an `OrderedDict` capped at 200 sessions (least recently used are dropped). They are lost on restart.
 
@@ -70,8 +73,9 @@ Dependencies go one way: `server` → `agent` → `registry` → `tools` → `da
 
 ## 4. Data model
 
-* `restaurants`: `restaurant_id` (`REST-0001`…), unique `name`, `city`, `area`, `cuisine`, `price_range`, `rating` (NULL for about 4% = "not rated yet"), `seating_capacity`, `opening_hours` (`"12:00-00:00"`; a closing time at or before the opening time means after midnight), plus analytics columns with deliberate gaps and outliers (`review_count`, `average_meal_price`, `monthly_revenue`, `operating_costs`, `opening_year`). The agent never reads the analytics columns.
-* `menu_items`: 4–6 dishes per restaurant from a per-cuisine template; `allergens` uses the 14 EU-declared allergen names; `vegetarian`, `vegan`, `price` (scaled by price range).
+* `restaurants`: `restaurant_id` (`REST-0001`…), unique `name`, `city`, `area`, `cuisine`, `price_range` (internal: scales menu prices; never shown to the agent), `price_per_person` (typical EUR per person = two courses at the menu's median price, rounded to 5), `rating` (NULL for about 4% = "not rated yet"), `seating_capacity`, `opening_hours` (`"12:00-00:00"`; a closing time at or before the opening time means after midnight), plus analytics columns with deliberate gaps and outliers (`review_count`, `average_meal_price`, `monthly_revenue`, `operating_costs`, `opening_year`). The agent never reads the analytics columns.
+* `menu_items`: dishes from a per-cuisine template (4–6 per restaurant; 7–10 for Bulgarian, including телешко варено, пилешка супа, шкембе чорба, мусака and сарми); `dish_name` (English) and `names` (JSON with the name in en, bg, de, es, fr, it); `allergens` uses the 14 EU-declared allergen names (stored in English; `data.ALLERGEN_NAMES` has them in all six languages, so `get_menu` returns "целина", not the model's own "селера"); `vegetarian`, `vegan`, `price` (scaled by price range).
+* `ensure_database()` rebuilds the database when a required column is missing, which deletes reservations (demo data, no migrations).
 * `reservations`: `code` (unique, e.g. `R34LST`), `restaurant_id`, `customer_name`, `phone`, `date`, `time`, `guests`, `notes`, `status` (`confirmed` | `cancelled`), timestamps. Index on `(restaurant_id, date, status)`.
 
 Locations: Sofia (Center, Lozenets, Vitosha Blvd), Plovdiv (Old Town, Kapana), Varna (Sea Garden, Center), London (Soho), Berlin (Mitte). Cuisines: Italian, Bulgarian, Japanese, Mexican, French, Indian, Mediterranean, Steakhouse.
@@ -84,8 +88,8 @@ Locations: Sofia (Center, Lozenets, Vitosha Blvd), Plovdiv (Old Town, Kapana), V
 
 | Tool | What it does |
 |---|---|
-| `search_restaurants` | Filters: `name` (partial), `cuisine`, `city`, `area`, `min_rating`, `open_at` (HH:MM, handles past-midnight hours). Sorted by rating, unrated last; up to 10 results. Unknown values return the allowed list. |
-| `get_menu` | Dishes with allergens; `avoid_allergens` (everyday words such as "dairy" or "wheat" are mapped) marks `contains_avoided` and lists `safe_dishes` with a safety note. Vegetarian/vegan filters. |
+| `search_restaurants` | Filters: `name` (partial), `cuisine`, `city`, `area`, `min_rating`, `max_price_per_person`, `open_at` (HH:MM, handles past-midnight hours). `sort_by`: rating (unrated last) or price. Each result has `price_per_person` ("about 20 EUR"); up to 10 results. Unknown values return the allowed list. |
+| `get_menu` | Dishes in the requested `language` (stored translations, English fallback), prices as "6.00 EUR", with allergens; `avoid_allergens` (everyday words such as "dairy" or "wheat" are mapped) marks `contains_avoided` and lists `safe_dishes` with a safety note. Vegetarian/vegan filters. |
 | `check_availability` | Validates the request and checks seats; does not book. When full, returns up to 3 nearest free times. |
 | `book_table` | Same checks inside `BEGIN IMMEDIATE`, then inserts. Needs a name (2–80 characters). Returns the code. |
 | `find_reservation` | Lookup by code. |
@@ -97,46 +101,61 @@ Locations: Sofia (Center, Lozenets, Vitosha Blvd), Plovdiv (Old Town, Kapana), V
 * Not in the past; at most 60 days ahead; 1–20 guests (more → the events team, i.e. a human).
 * A reservation blocks its seats for 120 minutes: another booking overlaps if the start times are less than 120 minutes apart. Seats taken = sum of overlapping confirmed guests; the limit is `seating_capacity`.
 * Codes: `R` + 5 characters from an alphabet without `0/O` and `1/I`, with at least one digit. Lookups accept `r34lst`, `R-34LST`, `R 3 4 L S T` and `34LST`.
-* The booking name is the ownership check for changes and cancellations (case-insensitive).
+* The booking name is the ownership check for changes and cancellations. It is compared on a Latin, letters-only key with a similarity of at least 0.85 (names of 5+ letters), because speech recognition heard "Хано Споруха" at booking and "Хано Спаруха" when cancelling. A different name does not match. On a mismatch the agent asks the guest to spell or type the name, then offers a colleague.
 
 **Result format:** `{"status": "success" | "unavailable" | "error", ...}`. Error messages say what to fix, so the model can correct itself or ask the guest. An unexpected exception becomes `system_error` with a generic message; the details go to the server log only.
 
 ---
 
-## 6. System prompt (`build_system_prompt` in `restaurant/agent.py`)
+## 6. Model management
+
+* The hardware fits **one** 26–27B model in GPU memory, so the active model is global, not per session.
+* `ALLOWED_MODELS` (Gemma 4 26B first = default, Qwen 3.8 27B) are the models offered in the UI. A model that is not installed in LM Studio is shown as "(not installed)" and cannot be picked.
+* On startup the default model is loaded in a background thread (`ensure_default_model_on_startup`).
+* `POST /api/model` unloads the other allowed models through the LM Studio REST API (`/api/v1/models/unload`), then loads the target (`/api/v1/models/load`, context `LLM_CONTEXT_LENGTH`). If that fails, the previous model is restored.
+* While a switch runs, chat answers "one moment" in the guest's language without calling the LLM. A switch is refused (HTTP 409) while any turn is waiting for the LLM, so the model that is answering is never unloaded; the browser also disables the selector during its own turns.
+* LM Studio is shared: the website concierge (also on port 1235) defaults to Gemma too. Switching here affects every app that uses LM Studio.
+
+## 7. System prompt (`build_system_prompt` in `restaurant/agent.py`)
 
 * **Today's date, weekday and time** come from `tools.now()` (frozen in tests and evals), so "tomorrow" and "on Friday" resolve correctly.
 * **Language:** reply in the language of the guest's latest message; for voice turns the detected language is added.
 * **Style:** read aloud, so 1–3 short sentences, no Markdown or IDs. **Times as digits exactly as in the tool result**: an earlier "say times naturally" rule made Gemma read 19:30 back as "half past nine".
 * **Facts** only from tool results; pass `open_at` when the guest says when they want to eat.
+* **Names:** restaurant names exactly as in the tool result, never translated (Qwen once turned "Old Mill" into "Стар Мил"); dish names from `get_menu` in the guest's language. **Prices:** per person in euros, never `$` signs.
 * **Booking:** check, read the details back, book only after a yes, give the code exactly as written. Until `book_table` succeeds, never say booked, reserved or confirmed.
+* **Enforced in code** (`run_llm_turn`): `book_table` runs only for restaurant/date/time/guests that `check_availability` reported available in an *earlier* turn of the conversation. Otherwise the model gets "Not booked: ask the guest first". Added after Gemma booked without asking in 2 of 2 eval runs once the prompt had grown.
 * **Allergies:** filtered menu, remind to tell the staff, offer to add a note.
 * **Never promise an action no tool can do.**
 * **Errors:** fix or ask on `error`; offer a human on `system_error`.
 
 ---
 
-## 7. Voice
+## 8. Voice
 
-* **STT:** faster-whisper `large-v3-turbo` on the CPU (int8), lazy-loaded on the first voice request (the first one is slow). Language = the most probable of EN, BG, DE, ES, FR, IT (short Bulgarian clips are otherwise labelled RU or MK). A per-language vocabulary prompt helps with booking terms. VAD is on.
+* **STT:** faster-whisper `large-v3-turbo` on the CPU (int8), lazy-loaded on the first voice request (the first one is slow). Language = the most probable of EN, BG, DE, ES, FR, IT (short Bulgarian clips are otherwise labelled RU or MK). A per-language vocabulary prompt helps with booking terms (the Bulgarian one lists the dish names; "телешко варено" was heard as "телешко в арен"). VAD is on. The detection probabilities are logged.
+* **Speech language selector** (next to the microphone): Auto-detect or a fixed language. A fixed language skips detection; added after Bulgarian turns were heard as Spanish and Italian and the agent answered in those languages.
 * **Reply language for TTS:** Cyrillic → Bulgarian; otherwise a small stop-word score for EN/DE/ES/FR/IT.
 * **TTS:** edge-tts, an **online Microsoft service** (the reply text leaves the machine). One male and one female voice per language. Reservation codes are spelled out for the voice only (`R34LST` → "R, 3, 4, L, S, T"). Three attempts with a 15 s timeout each.
 
 ---
 
-## 8. Frontend (`index.html`)
+## 9. Frontend (`index.html`)
 
 * Conversation: text box (Enter sends, Shift+Enter adds a line), microphone button (click to start, click to send, 30 s maximum, microphone released after use, friendly message when access is blocked), example prompts, "New conversation", voice replies on/off and voice gender (saved in localStorage), "Read aloud" per reply, elapsed-seconds indicator.
 * Each reply shows its tool calls as chips coloured by status; a click shows the arguments.
 * Staff view: reservations with code, guest and notes, restaurant and area, time, guests and status; new rows flash; cancelled rows are struck through.
 * All model and user text is rendered with DOM nodes and `textContent`, never as HTML.
-* Header dot: model reachable and loaded (`/api/health`).
+* Header: model selector (Gemma / Qwen) with the status dot inside it (green = ready, red = loading, not loaded or LM Studio not reachable). The status text goes to the tooltip and to screen readers, since colour alone is not accessible.
+* Text size: A− / A+ from 12 to 24 px in 2 px steps, saved in localStorage (`fontSize`). One CSS variable (`--fs`) scales the messages, input box, tool details, example prompts and the staff view.
+
+**localStorage keys:** `voiceReplies`, `voiceGender`, `speechLanguage`, `fontSize`.
 
 ---
 
-## 9. Tests and evals
+## 10. Tests and evals
 
-**Deterministic tests** (36: 15 tool, 11 API, 10 Playwright; about 9 s; no GPU or LM Studio):
+**Deterministic tests** (51: 21 tool, 17 API, 13 Playwright; about 11 s; no GPU or LM Studio):
 ```powershell
 pip install -r requirements-dev.txt
 python -m pytest --browser-channel msedge   # local run on the installed Edge
@@ -147,24 +166,25 @@ python -m pytest                            # needs: python -m playwright instal
 * CI (`.github/workflows/tests.yml`) runs everything on every push.
 
 **LLM evals** (`python evals/run_evals.py [--repeat N] [--cases ...]`, LM Studio required):
-* 20 conversations in English, Bulgarian and German, each on fresh data with a frozen clock (a case can set its own clock), graded on reservations, tool calls and the reply.
+* 23 conversations in English, Bulgarian and German, each on fresh data with a frozen clock (a case can set its own clock), graded on reservations, tool calls and the reply.
 * `lead_in` turns run through the model before the graded turn, so the history holds real tool calls and results. A synthetic text history did **not** reproduce the early-confirmation problem below; real lead-in turns and the late-night clock did.
-* Problems found and fixed: no way to look a restaurant up by name; Gemma dropping the dash when reading back `R-34LST` (codes no longer have a dash); Gemma saying "Подтверждавам резервация" ("I confirm the reservation") before booking, seen near midnight (prompt rule; the eval failed 2/4 runs before and 0/4 after).
-* Last run: Gemma 4 26B **40/40** (two runs per case), median 7.1 s per turn. Results: `evals/results/latest.md`.
+* Problems found and fixed: no way to look a restaurant up by name; Gemma dropping the dash when reading back `R-34LST` (codes no longer have a dash); Gemma saying "Подтверждавам резервация" ("I confirm the reservation") before booking, seen near midnight (prompt rule; the eval failed 2/4 runs before and 0/4 after); Qwen translating restaurant names ("Стар Мил" for "Old Mill"; 1/4 runs before, 0/6 after, a rare failure); Gemma booking without asking after the prompt grew (2/2 runs; now blocked in code, see §7).
+* `--models` (default: both allowed models) loads each model in turn and loads Gemma again at the end.
+* Last runs (23 cases × 2): Gemma 4 26B **46/46**, median 6.0 s per turn; Qwen 3.8 27B **45/46**, median 23.7 s. Qwen's failure: it read out the guest's name after looking up a code (`find_reservation` returns it). Results: `evals/results/latest.md`.
 
 ---
 
-## 10. Gotchas
+## 11. Gotchas
 
 * **LM Studio port is 1235.** A red dot in the header means LM Studio is not reachable or the model is not loaded.
 * **`av<19`:** faster-whisper 1.2.x calls `av.open(..., metadata_errors=...)`, which PyAV 19 removed.
 * **Windows console and Cyrillic:** set `PYTHONIOENCODING=utf-8` when printing Bulgarian text from scripts.
 * **`setup_db.py` while the server runs:** the server keeps working, but all reservations are gone.
-* Run evals against a model that is already loaded; the script does not load or switch models.
+* Evals switch the model in LM Studio; a running app server keeps showing its own active model until the next switch. Do not chat with the app while evals run.
 
 ---
 
-## 11. Known limitations
+## 12. Known limitations
 
 * No authentication: anyone who can open the page sees the staff view.
 * Sessions are in memory and lost on restart; the 200-session cap has no time-based expiry.
@@ -174,7 +194,7 @@ python -m pytest                            # needs: python -m playwright instal
 * TTS is online.
 * For a public demo the app would need HTTPS, authentication for the staff view, rate limits and persistent storage.
 
-## 12. Ideas for next steps
+## 13. Ideas for next steps
 
 * Confirmation by SMS or email, and a phone-number check for changes.
 * Table-level seating (2-, 4- and 6-seat tables) instead of one capacity number.
