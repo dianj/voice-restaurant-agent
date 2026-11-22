@@ -48,6 +48,10 @@ def calls(run, name):
     return [json.loads(c["arguments"] or "{}") for c in run["tools"] if c["name"] == name]
 
 
+def booking_key_of(arguments):
+    return (arguments.get("restaurant_id"), arguments.get("date"), arguments.get("time"), arguments.get("guests"))
+
+
 def called(run, name):
     return bool(calls(run, name))
 
@@ -97,6 +101,12 @@ def book(name="Maria", restaurant=MARBLE, time_="19:00", guests=2):
 
 def seed_booking():
     return {"code": book()}
+
+
+def seed_cancelled_booking():
+    code = book()
+    tools.cancel_reservation(code, "Maria")
+    return {"code": code}
 
 
 def fill_olive_fork():
@@ -162,6 +172,15 @@ CASES = [
          "before booking, says the table is available and asks; never claims it is already confirmed (seen in testing)",
          lead_in=("Здравейте! Търся италиански ресторант в центъра на София за утре вечер.",),
          now=datetime(2026, 11, 22, 0, 40)),  # the late-night clock of the live test where it was seen
+    Case("booking-uses-restaurant-in-context-bg",
+         "Искам да направя резервация за след 4 дни, за 5 човека от 20:30. Да е на името на Тихомир Несторов.",
+         lambda r: not called(r, "book_table")
+         and any(a.get("restaurant_id") == "REST-0389" for a in calls(r, "check_availability"))
+         and "Rustic Cellar" in r["reply"],
+         "books at the restaurant the guest was just asking about instead of asking which one (seen in testing)",
+         setup=seed_booking,
+         lead_in=("Искам да преместя резервация {code} в 19:30, на името на Мария е.",
+                  "Търся гръцки ресторант в София.", "какво е менюто в Rustic Cellar")),
     Case("book-after-confirmation", "Yes, please book it.",
          lambda r: one_booking(r, restaurant=MARBLE[1], date=TOMORROW, time="19:30", guests=2, customer_name="Maria")
          and reservations(r)[0]["code"] in r["reply"],
@@ -176,11 +195,22 @@ CASES = [
          "slot is full; offers alternative times from the tool",
          setup=fill_olive_fork),
     Case("past-date", "Book a table for 2 at Marble Hearth yesterday at 19:30 for Maria.",
-         lambda r: not reservations(r) and mentions(r["reply"], "past", "passed", "yesterday"),
+         lambda r: not reservations(r) and mentions(r["reply"], "past", "passed", "yesterday", "future"),
          "refuses a time in the past"),
     Case("large-group", "We are 30 people. Table at Marble Hearth tomorrow at 19:00, name Ivan.",
-         lambda r: not reservations(r) and mentions(r["reply"], "colleague", "events", "team"),
-         "groups over 20 go to a human"),
+         lambda r: not reservations(r) and not r["requests"] and "?" in r["reply"]
+         and mentions(r["reply"], "phone", "email", "e-mail", "contact", "call you back"),
+         "groups over 20 go to a human: asks how a colleague can reach them instead of promising a call"),
+    Case("no-false-handoff-bg", "Над 20 души, искам да прехвърлите запитването към екипа ви.",
+         lambda r: not r["requests"] and mentions(r["reply"], "телефон", "имейл", "email", "e-mail", "контакт"),
+         "does not claim to have passed the request on before it has a way to reach the guest (seen in testing)",
+         lead_in=("Имам въпрос относно организиране на детско парти в ресторант в София.",)),
+    Case("event-callback-bg", "Да, моля.",
+         lambda r: len(r["requests"]) == 1 and "0888" in r["requests"][0]["contact"]
+         and "иван" in r["requests"][0]["customer_name"].lower() and mentions(r["reply"], "колег", "екип", "свърж"),
+         "saves a callback request with the name and phone, so a colleague really can call back",
+         lead_in=("Имам въпрос относно организиране на детско парти в ресторант в София.",
+                  "Ще са около 25 деца, в събота следобед. Казвам се Иван Петров, телефонът ми е 0888 123 456.")),
 
     # --- menu and allergens ---
     Case("menu-in-guest-language-bg", "Какво има в менюто на Olive Fork?",
@@ -210,9 +240,16 @@ CASES = [
          lambda r: one_booking(r, time="20:30"),
          "moves the booking to a new time",
          setup=seed_booking),
+    Case("add-name", "My reservation {code} is under Maria, but my colleague Peter Ivanov will come instead. "
+                     "Can you put it under his name?",
+         lambda r: one_booking(r, customer_name="Maria")
+         and any("peter" in n.lower() for n in reservations(r)[0]["extra_names"]),
+         "adds the new name and keeps the original one (names are added, never replaced)",
+         setup=seed_booking),
     Case("cancel-needs-name", "Cancel reservation {code}.",
-         lambda r: reservations(r)[0]["status"] == "confirmed" and mentions(r["reply"], "name"),
-         "does not cancel without the booking name",
+         lambda r: reservations(r)[0]["status"] == "confirmed" and mentions(r["reply"], "name")
+         and "maria" not in r["reply"].lower(),
+         "does not cancel without the booking name and does not reveal it (Qwen said 'booked under Maria')",
          setup=seed_booking),
     Case("cancel-after-confirmation", "Yes.",
          lambda r: reservations(r)[0]["status"] == "cancelled",
@@ -221,6 +258,13 @@ CASES = [
          history=(("user", "Please cancel reservation {code}, the name is Maria."),
                   ("assistant", "I found reservation {code} for Maria at Marble Hearth on 2026-11-21 at 19:00. "
                                 "Shall I cancel it?"))),
+
+    Case("rebook-cancelled-bg", "Анулирах резервация {code} по грешка, на името на Мария е. Може ли да я възстановите?",
+         lambda r: not called(r, "book_table")
+         and any(booking_key_of(a) == (MARBLE[0], TOMORROW, "19:00", 2) for a in calls(r, "check_availability"))
+         and "?" in r["reply"],
+         "offers to book the same table again instead of only passing the guest to a colleague (seen in testing)",
+         setup=seed_cancelled_booking),
 
     # --- scope ---
     Case("out-of-scope", "Can you also order me a taxi to the restaurant?",
@@ -238,10 +282,10 @@ def run_case(case, model):
     tool_calls = []
     try:
         for text in case.lead_in:
-            history.append({"role": "user", "content": text})
+            history.append({"role": "user", "content": text.format(**context)})
             history.append({"role": "assistant", "content": agent.run_llm_turn(history, [], model=model).content or ""})
     except Exception as e:
-        return {"case": case.id, "outcome": "error", "reply": "", "tools": [], "reservations": [], "seconds": 0,
+        return {"case": case.id, "outcome": "error", "reply": "", "tools": [], "reservations": [], "requests": [], "seconds": 0,
                 "error": f"lead-in failed: {e}"}
     history.append({"role": "user", "content": case.prompt.format(**context)})
     started = time.time()
@@ -250,7 +294,7 @@ def run_case(case, model):
         reply, error = (msg.content or ""), None
     except Exception as e:
         reply, error = "", str(e)
-    run = {"reply": reply, "tools": tool_calls, "reservations": tools.list_reservations(),
+    run = {"reply": reply, "tools": tool_calls, "reservations": tools.list_reservations(), "requests": tools.list_requests(),
            "seconds": time.time() - started, "error": error}
     try:
         passed = error is None and bool(case.check(run))
