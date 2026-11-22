@@ -179,3 +179,48 @@ def test_cancelled_reservation_cannot_be_changed():
 def test_search_by_part_of_the_name():
     result = call(tools.search_restaurants, name="marble hearth")
     assert [r["name"] for r in result["restaurants"]] == ["Marble Hearth"]
+
+
+
+# --- Menus in the guest's language and prices -------------------------------------------
+
+def test_menu_dish_names_follow_the_guest_language_and_prices_have_two_decimals():
+    rid = restaurant("cuisine = 'Bulgarian'")["restaurant_id"]
+    english = call(tools.get_menu, rid)
+    bulgarian = call(tools.get_menu, rid, language="bg")
+    assert [d["price"] for d in english["dishes"]] == [d["price"] for d in bulgarian["dishes"]]
+    assert all(re.fullmatch(r"\d+\.\d\d EUR", d["price"]) for d in bulgarian["dishes"])
+    assert all(re.search(r"[А-я]", d["dish"]) for d in bulgarian["dishes"])  # Cyrillic names
+    assert call(tools.get_menu, rid, language="xx")["language"] == "en"  # unknown -> English
+
+
+def test_bulgarian_menus_include_the_classics():
+    names = {json.loads(n)["bg"] for (n,) in data.sqlite3.connect(config.DB_PATH).execute(
+        "SELECT names FROM menu_items m JOIN restaurants r USING (restaurant_id) WHERE r.cuisine = 'Bulgarian'")}
+    assert {"Телешко варено", "Пилешка супа", "Шкембе чорба", "Мусака", "Сарми", "Таратор"} <= names
+
+
+def test_search_shows_price_per_person_and_can_sort_by_it():
+    result = call(tools.search_restaurants, city="Sofia", cuisine="Italian", sort_by="price", limit=10)
+    prices = [int(r["price_per_person"].split()[1]) for r in result["restaurants"]]
+    assert prices == sorted(prices)
+    assert all("price_range" not in r for r in result["restaurants"])  # no "$$$" for the agent to read out
+    cheap = call(tools.search_restaurants, city="Sofia", max_price_per_person=15, limit=10)["restaurants"]
+    assert cheap and all(int(r["price_per_person"].split()[1]) <= 15 for r in cheap)
+    assert call(tools.search_restaurants, sort_by="cheapest")["status"] == "error"
+
+
+def test_price_per_person_is_two_courses_at_the_median_rounded_to_5():
+    assert data.price_per_person([4.0, 6.0, 8.0, 20.0]) == 15   # median 7 -> 14 -> 15
+    assert data.price_per_person([2.0, 2.0]) == 5               # never below 5
+
+
+def test_allergen_names_follow_the_guest_language():
+    rid = restaurant("restaurant_id IN (SELECT restaurant_id FROM menu_items WHERE allergens LIKE '%celery%')")["restaurant_id"]
+    bulgarian = call(tools.get_menu, rid, language="bg", avoid_allergens=["celery"])
+    named = {a for d in bulgarian["dishes"] for a in d["allergens"]}
+    assert "целина" in named and "celery" not in named          # not the non-word "селера"
+    flagged = [d for d in bulgarian["dishes"] if d["contains_avoided"]]
+    assert flagged and all(d["contains_avoided"] == ["целина"] or "целина" in d["contains_avoided"] for d in flagged)
+    assert call(tools.get_menu, rid, language="de")["dishes"][0]["allergens"][0] in data.ALLERGEN_NAMES["de"].values() \
+        or call(tools.get_menu, rid, language="de")["dishes"][0]["allergens"] == ["keine angegeben"]

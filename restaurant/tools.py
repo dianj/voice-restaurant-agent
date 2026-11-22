@@ -11,7 +11,9 @@ from contextlib import contextmanager
 from datetime import date as date_cls, datetime, timedelta
 
 from . import config
-from .data import ALLERGENS, CUISINES, LOCATIONS
+from .data import ALLERGEN_NAMES, ALLERGENS, CUISINES, LOCATIONS, NO_ALLERGENS
+
+MENU_LANGUAGES = config.SUPPORTED_LANGUAGES
 
 # Words clients use for the 14 declared allergens.
 ALLERGEN_SYNONYMS = {
@@ -91,6 +93,11 @@ def get_restaurant(conn, restaurant_id) -> sqlite3.Row | None:
 
 def describe_rating(rating) -> float | str:
     return rating if rating is not None else "not rated yet"
+
+
+def euros(amount: float) -> str:
+    """6.0 -> '6.00 EUR', so the model never says '6.0 €'."""
+    return f"{amount:.2f} EUR"
 
 
 def parse_booking_request(restaurant, date_text, time_text, guests):
@@ -207,7 +214,8 @@ def normalize_code(code) -> str:
 # --- Tools ------------------------------------------------------------------------------
 
 def search_restaurants(name: str = None, cuisine: str = None, city: str = None, area: str = None,
-                       min_rating: float = None, open_at: str = None, limit: int = 5):
+                       min_rating: float = None, open_at: str = None, max_price_per_person: int = None,
+                       sort_by: str = "rating", limit: int = 5):
     clauses, params = [], []
     if name:
         if not isinstance(name, str) or len(name.strip()) < 2:
@@ -239,6 +247,14 @@ def search_restaurants(name: str = None, cuisine: str = None, city: str = None, 
             return error("min_rating must be a number between 0 and 5.")
         clauses.append("rating >= ?")
         params.append(min_rating)
+    if max_price_per_person is not None:
+        if isinstance(max_price_per_person, bool) or not isinstance(max_price_per_person, (int, float)) \
+                or max_price_per_person <= 0:
+            return error("max_price_per_person must be a positive number of euros.")
+        clauses.append("price_per_person <= ?")
+        params.append(max_price_per_person)
+    if sort_by not in ("rating", "price"):
+        return error("sort_by must be 'rating' or 'price'.")
     if open_at is not None:
         try:
             wanted = minutes(str(open_at).strip())
@@ -248,10 +264,12 @@ def search_restaurants(name: str = None, cuisine: str = None, city: str = None, 
         limit = 5
 
     where = " AND ".join(clauses) or "1 = 1"
+    order = ("price_per_person, rating IS NULL, rating DESC, name" if sort_by == "price"
+             else "rating IS NULL, rating DESC, name")
     with db() as conn:
         rows = conn.execute(
-            f"SELECT restaurant_id, name, city, area, cuisine, price_range, rating, opening_hours "
-            f"FROM restaurants WHERE {where} ORDER BY rating IS NULL, rating DESC, name", params
+            f"SELECT restaurant_id, name, city, area, cuisine, rating, opening_hours, price_per_person "
+            f"FROM restaurants WHERE {where} ORDER BY {order}", params
         ).fetchall()
     if open_at is not None:
         def is_open(row):
@@ -261,11 +279,16 @@ def search_restaurants(name: str = None, cuisine: str = None, city: str = None, 
     if not rows:
         return result("success", total_matches=0, restaurants=[],
                       hint="No match. Suggest relaxing a filter (another area, cuisine or time).")
-    top = [{**dict(r), "rating": describe_rating(r["rating"])} for r in rows[:limit]]
+    top = [{**dict(r), "rating": describe_rating(r["rating"]),
+            "price_per_person": f"about {r['price_per_person']} EUR"} for r in rows[:limit]]
     return result("success", total_matches=len(rows), restaurants=top)
 
 
-def get_menu(restaurant_id: str, avoid_allergens: list = None, vegetarian_only: bool = False, vegan_only: bool = False):
+def get_menu(restaurant_id: str, language: str = "en", avoid_allergens: list = None, vegetarian_only: bool = False,
+             vegan_only: bool = False):
+    """Dish and allergen names come back in the guest's language (stored per language, never machine-translated)."""
+    if language not in MENU_LANGUAGES:
+        language = "en"
     avoid = []
     for item in avoid_allergens or []:
         name = ALLERGEN_SYNONYMS.get(str(item).strip().lower(), str(item).strip().lower())
@@ -277,7 +300,7 @@ def get_menu(restaurant_id: str, avoid_allergens: list = None, vegetarian_only: 
         if not restaurant:
             return error(f"Restaurant '{restaurant_id}' not found. Use search_restaurants to find the ID.")
         rows = conn.execute(
-            "SELECT dish_name, ingredients, allergens, vegetarian, vegan, price FROM menu_items "
+            "SELECT dish_name, names, ingredients, allergens, vegetarian, vegan, price FROM menu_items "
             "WHERE restaurant_id = ? ORDER BY id", (restaurant["restaurant_id"],)
         ).fetchall()
     dishes = []
@@ -285,12 +308,16 @@ def get_menu(restaurant_id: str, avoid_allergens: list = None, vegetarian_only: 
         allergens = [a.strip() for a in r["allergens"].split(",") if a.strip()]
         if vegetarian_only and not r["vegetarian"] or vegan_only and not r["vegan"]:
             continue
-        dish = {"dish": r["dish_name"], "ingredients": r["ingredients"], "allergens": allergens or ["none declared"],
-                "vegetarian": bool(r["vegetarian"]), "vegan": bool(r["vegan"]), "price_eur": r["price"]}
+        name = json.loads(r["names"]).get(language) or r["dish_name"]
+        local = ALLERGEN_NAMES[language]
+        dish = {"dish": name, "ingredients": r["ingredients"],
+                "allergens": [local[a] for a in allergens] or [NO_ALLERGENS[language]],
+                "vegetarian": bool(r["vegetarian"]), "vegan": bool(r["vegan"]), "price": euros(r["price"])}
         if avoid:
-            dish["contains_avoided"] = sorted(set(allergens) & set(avoid))
+            dish["contains_avoided"] = [local[a] for a in allergens if a in avoid]
         dishes.append(dish)
-    fields = {"restaurant": restaurant["name"], "restaurant_id": restaurant["restaurant_id"], "dishes": dishes}
+    fields = {"restaurant": restaurant["name"], "restaurant_id": restaurant["restaurant_id"], "language": language,
+              "price_per_person": f"about {restaurant['price_per_person']} EUR", "dishes": dishes}
     if avoid:
         fields["safe_dishes"] = [d["dish"] for d in dishes if not d["contains_avoided"]]
         fields["safety_note"] = ("Allergen data comes from the menu. Kitchens handle all allergens, so trace amounts "

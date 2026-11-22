@@ -11,8 +11,9 @@ AREAS = sorted({area for areas in LOCATIONS.values() for area in areas})
 TOOLS_SCHEMA = [
     {"type": "function", "function": {
         "name": "search_restaurants",
-        "description": "Find restaurants in the network by name, cuisine, city, area, minimum rating and/or a time they "
-                       "are open. Results are sorted by rating. Use it to get the restaurant_id when the guest names a "
+        "description": "Find restaurants in the network by name, cuisine, city, area, minimum rating, budget and/or a time "
+                       "they are open. Each result has a typical price per person in EUR. Sorted by rating unless "
+                       "sort_by='price'. Use it to get the restaurant_id when the guest names a "
                        "restaurant. Use English names for cuisine, city and area.",
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string", "description": "Part of the restaurant name, e.g. 'Marble Hearth'."},
@@ -22,15 +23,21 @@ TOOLS_SCHEMA = [
             "min_rating": {"type": "number", "description": "0-5, e.g. 4.5"},
             "open_at": {"type": "string", "description": "HH:MM. Use it whenever the guest mentions when they want to "
                                                        "eat (tonight -> 20:00, at 21:30 -> 21:30, now -> current time)."},
+            "max_price_per_person": {"type": "integer", "description": "Budget in EUR per person, e.g. 25."},
+            "sort_by": {"type": "string", "enum": ["rating", "price"],
+                        "description": "rating (default) or price = cheapest first, e.g. for 'the cheapest one'."},
             "limit": {"type": "integer", "description": "1-10, default 5."},
         }},
     }},
     {"type": "function", "function": {
         "name": "get_menu",
         "description": "Menu of one restaurant with ingredients, declared allergens, vegetarian/vegan flags and prices. "
-                       "Pass avoid_allergens to get the dishes that are safe for the guest.",
+                       "Dish names come back in the requested language. Pass avoid_allergens to get the dishes that are "
+                       "safe for the guest.",
         "parameters": {"type": "object", "properties": {
             "restaurant_id": {"type": "string", "description": "e.g. REST-0042 (from search_restaurants)."},
+            "language": {"type": "string", "enum": ["en", "bg", "de", "es", "fr", "it"],
+                         "description": "The guest's language, for the dish names."},
             "avoid_allergens": {"type": "array", "items": {"type": "string", "enum": list(ALLERGENS)}},
             "vegetarian_only": {"type": "boolean"},
             "vegan_only": {"type": "boolean"},
