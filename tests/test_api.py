@@ -25,18 +25,36 @@ def first_restaurant():
     return row["restaurant_id"]
 
 
-def test_booking_turn_runs_tools_and_shows_up_in_the_staff_view(client, fake_lm):
-    rid = first_restaurant()
-    fake_lm.script(("check_availability", {"restaurant_id": rid, "date": "2026-11-21", "time": "19:30", "guests": 2}),
-                   ("book_table", {"restaurant_id": rid, "customer_name": "Alex", "date": "2026-11-21",
-                                   "time": "19:30", "guests": 2}),
-                   reply="Booked.")
-    data = chat(client, "Yes, please book it")
+def offer_then_book(client, fake_lm, rid, name="Alex", time="19:30"):
+    """Turn 1: the agent checks and asks. Turn 2: the guest says yes and the agent books."""
+    details = {"restaurant_id": rid, "date": "2026-11-21", "time": time, "guests": 2}
+    fake_lm.script(("check_availability", details), reply="A table is available. Shall I book it?")
+    chat(client, f"A table for 2 tomorrow at {time} under {name}")
+    fake_lm.script(("book_table", {**details, "customer_name": name}), reply="Booked.")
+    return chat(client, "Yes, please book it")
+
+
+def test_booking_after_the_guest_confirms_shows_up_in_the_staff_view(client, fake_lm):
+    data = offer_then_book(client, fake_lm, first_restaurant())
     assert data["reply"] == "Booked."
-    assert [(c["name"], c["status"]) for c in data["tool_calls"]] == [("check_availability", "success"),
-                                                                      ("book_table", "success")]
+    assert [(c["name"], c["status"]) for c in data["tool_calls"]] == [("book_table", "success")]
     reservations = client.get("/api/reservations").json()["reservations"]
     assert reservations[0]["customer_name"] == "Alex" and reservations[0]["status"] == "confirmed"
+
+
+def test_booking_without_the_guests_yes_is_refused_in_code(client, fake_lm):
+    rid = first_restaurant()
+    details = {"restaurant_id": rid, "date": "2026-11-21", "time": "19:30", "guests": 2}
+    # Check and book in the same turn: the guest never heard the details.
+    fake_lm.script(("check_availability", details), ("book_table", {**details, "customer_name": "Alex"}),
+                   reply="Shall I book it?")
+    data = chat(client, "Book a table for 2 tomorrow at 19:30 under Alex")
+    assert [c["status"] for c in data["tool_calls"]] == ["success", "error"]
+    assert "Not booked" in fake_lm.requests[-1]["messages"][-1]["content"]
+    # The guest agrees, but the model books different details than were offered.
+    fake_lm.script(("book_table", {**details, "time": "20:00", "customer_name": "Alex"}), reply="Hmm.")
+    assert chat(client, "Yes")["tool_calls"][0]["status"] == "error"
+    assert client.get("/api/reservations").json()["reservations"] == []
 
 
 def test_system_prompt_contains_today_and_all_tools(client, fake_lm):

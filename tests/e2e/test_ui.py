@@ -53,10 +53,13 @@ def test_model_output_is_rendered_as_text_not_html(page: Page, app_url, fake_lm)
 
 def test_booking_appears_in_the_staff_view(page: Page, app_url, fake_lm):
     rid, name = restaurant_10_to_22()
-    fake_lm.script(("book_table", {"restaurant_id": rid, "customer_name": "Maria", "date": "2026-11-21",
-                                   "time": "19:30", "guests": 2}), reply="Booked.")
+    details = {"restaurant_id": rid, "date": "2026-11-21", "time": "19:30", "guests": 2}
+    fake_lm.script(("check_availability", details), reply="Available. Shall I book it?")
     open_app(page, app_url)
     expect(page.locator("#reservations")).to_contain_text("No reservations yet")
+    send(page, "A table for 2 tomorrow at 19:30, Maria")
+    expect(last_bot(page)).to_contain_text("Shall I book it?")
+    fake_lm.script(("book_table", {**details, "customer_name": "Maria"}), reply="Booked.")
     send(page, "Yes, book it")
     row = page.locator("#reservations tr").first
     expect(row).to_contain_text("Maria")
