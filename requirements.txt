@@ -1,7 +1,8 @@
-fastapi
-uvicorn
-python-multipart
-openai
-faster-whisper
+# Tested versions; the upper bounds keep the next major release from breaking a fresh install.
+fastapi>=0.165,<1
+uvicorn>=0.54,<1
+python-multipart>=0.0.34,<0.1
+openai>=3.57,<4
+faster-whisper>=1.2.1,<2
 av<19  # faster-whisper 1.2.x passes metadata_errors, removed in PyAV 19
-edge-tts
+edge-tts>=7.3,<8

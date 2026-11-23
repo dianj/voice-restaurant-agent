@@ -1,4 +1,7 @@
-pytest
-pytest-playwright
-httpx
-ruff
+# Exact versions, so local runs and CI use the same tools (playwright must match its installed browsers).
+pytest==9.2.0
+pytest-playwright==0.10.0
+playwright==1.65.2
+pytest-cov==7.1.0
+httpx==0.28.1
+ruff==0.17.6
