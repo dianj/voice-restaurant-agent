@@ -50,12 +50,13 @@ Environment variables: `LLM_BASE_URL`, `LLM_MODEL`, `WHISPER_MODEL`, `RESTAURANT
 
 ## Testing
 
-**57 deterministic tests, about 11 s, no GPU, 83% line coverage** (`pytest --cov`). A scripted fake of LM Studio (`tests/fake_lmstudio.py`) replaces the model and the clock is frozen. CI runs them on every push.
+**73 deterministic tests, about 14 s, no GPU, 87% line coverage** (`pytest --cov`). A scripted fake of LM Studio (`tests/fake_lmstudio.py`) replaces the model and the clock is frozen. CI runs them on every push.
 
 | Suite | What it covers |
 |---|---|
 | `tests/test_tools.py` (23) | Booking rules (hours, last seating, past dates, 2-hour overlaps, alternatives), changes that do not count the booking itself, ownership checks (including misheard names), added names and change history, callback requests, search and price sorting, allergen filtering, menus and allergens per language, deterministic data |
 | `tests/test_api.py` (18) | Full turns over HTTP, booking refused without the guest's yes, session isolation, recovery from an LLM outage, internal errors hidden from the guest, tool-loop limit, history trimming, model switching, the chosen speech language |
+| `tests/test_voice.py` (16) | Speech language limited to the six supported ones, the guest's choice skipping detection, Whisper loaded once on the CPU, the TTS voice for a typed conversation, Markdown not read aloud and reservation codes spelled out, TTS voice per language and gender, retries and a timeout per attempt (fake Whisper and edge-tts, no network) |
 | `tests/e2e/test_ui.py` (16, Playwright) | Tool chips, typing indicator, model output rendered as text (XSS), staff view after booking, changing and cancelling, callback requests, new conversation, outage message, TTS language, model selector and status, text size, speech language |
 
 ```bash
