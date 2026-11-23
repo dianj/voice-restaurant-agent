@@ -21,3 +21,5 @@ HANDOFF.md
 
 # Eval run details (the summary evals/results/latest.md is committed)
 evals/results/*.json
+.coverage
+coverage.xml
