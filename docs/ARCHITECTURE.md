@@ -34,8 +34,10 @@ The demo database is created on first start. `python setup_db.py` rebuilds it an
 | `restaurant/config.py` | Environment settings, business rules (sitting length, last seating, limits), voices |
 | `restaurant/data.py` | Schema, deterministic demo data (seed 42), `ensure_database()` |
 | `restaurant/tools.py` | The eight tools and the booking rules |
-| `restaurant/registry.py` | Tool schemas sent to the model; `execute_tool_call` never raises |
-| `restaurant/agent.py` | System prompt with today's date, tool-calling loop, history trimming |
+| `restaurant/tool_schemas.py` | Tool schemas sent to the model |
+| `restaurant/registry.py` | `execute_tool_call`, which never raises |
+| `restaurant/prompts.py` | System prompt with today's date |
+| `restaurant/agent.py` | Tool-calling loop, booking confirmation gate, history trimming |
 | `restaurant/lmstudio.py` | LM Studio model list, load, unload and switch |
 | `restaurant/voice.py` | faster-whisper STT with a restricted language pick, text language detection, edge-tts |
 | `index.html` | Single page, vanilla JS: conversation pane and staff view |
@@ -118,7 +120,7 @@ Locations: Sofia (Center, Lozenets, Vitosha Blvd), Plovdiv (Old Town, Kapana), V
 * While a switch runs, chat answers "one moment" in the guest's language without calling the LLM. A switch is refused (HTTP 409) while any turn is waiting for the LLM, so the model that is answering is never unloaded; the browser also disables the selector during its own turns.
 * LM Studio is shared: the website concierge (also on port 1235) defaults to Gemma too. Switching here affects every app that uses LM Studio.
 
-## 7. System prompt (`build_system_prompt` in `restaurant/agent.py`)
+## 7. System prompt (`build_system_prompt` in `restaurant/prompts.py`)
 
 * **Today's date, weekday and time** come from `tools.now()` (frozen in tests and evals), so "tomorrow" and "on Friday" resolve correctly.
 * **Language:** reply in the language of the guest's latest message; for voice turns the detected language is added.

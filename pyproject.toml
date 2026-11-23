@@ -9,8 +9,8 @@ ignore = ["B008"]
 
 [tool.ruff.lint.per-file-ignores]
 # Text the model reads (system prompt, tool schemas, demo data, eval cases) reads best one rule per line;
-# wrapping would make it harder to review what the model actually sees.
-"restaurant/agent.py" = ["E501"]
-"restaurant/registry.py" = ["E501"]
+# wrapping would make it harder to review what the model actually sees. The agent loop itself is checked.
+"restaurant/prompts.py" = ["E501"]
+"restaurant/tool_schemas.py" = ["E501"]
 "restaurant/data.py" = ["E501"]
 "evals/run_evals.py" = ["E501"]

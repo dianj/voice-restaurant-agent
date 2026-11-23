@@ -79,8 +79,10 @@ Writing the evals found real problems, now fixed: a guest naming a restaurant le
 |---|---|
 | `server.py` | FastAPI endpoints: chat (text or audio), TTS, staff view, health |
 | `restaurant/tools.py` | Search, menu, availability, booking, change and cancellation rules |
-| `restaurant/registry.py` | Tool schemas for the model and a dispatcher that never raises |
-| `restaurant/agent.py` | System prompt and the tool-calling loop |
+| `restaurant/tool_schemas.py` | Tool schemas sent to the model |
+| `restaurant/registry.py` | The dispatcher that runs tool calls and never raises |
+| `restaurant/prompts.py` | The system prompt |
+| `restaurant/agent.py` | The tool-calling loop and the booking confirmation gate |
 | `restaurant/voice.py` | Speech-to-text and text-to-speech |
 | `restaurant/data.py` | Schema and deterministic demo data (also exported to `restaurants_1000.csv`) |
 | `index.html` | Single-page UI: conversation and staff view |
