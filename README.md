@@ -1,14 +1,23 @@
 # Multilingual Voice Restaurant Concierge
 
-![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
+[![tests](https://github.com/dianj/voice-restaurant-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/dianj/voice-restaurant-agent/actions/workflows/tests.yml) ![Python 3.12](https://img.shields.io/badge/python-3.12-blue) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 A voice and text AI concierge for a restaurant group. Guests speak or type in English, Bulgarian, German, Spanish, French or Italian. The agent finds restaurants, answers menu and allergen questions, and books, changes or cancels tables. A staff view shows reservations as they are made.
 
 The LLM runs locally in LM Studio and works only through validated tools: it cannot invent a free table or a dish, because availability, menus and bookings come from SQLite through rules written in Python.
 
-![A booking in Bulgarian, then an allergen question in English; the agent adds the allergy to the reservation, which appears in the staff view](docs/screenshots/02-allergens-en.png)
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/01-booking-bg.png" alt="A booking in Bulgarian: search, availability check, booking after the guest confirms; the reservation appears in the staff view"></td>
+<td width="50%"><img src="docs/screenshots/02-allergens-en.png" alt="The same guest switches to English, asks about gluten-free dishes, and the allergy is added to the reservation"></td>
+</tr>
+<tr>
+<td><b>Booking in Bulgarian:</b> search, availability check, and a booking only after the guest says yes. The staff view shows it at once.</td>
+<td><b>Allergens in English:</b> the guest switches language mid-conversation; the agent lists only gluten-free dishes and adds the allergy to the booking, marked as changed for the staff.</td>
+</tr>
+</table>
 
-<sub>Screenshot from a real session with Gemma 4 26B in LM Studio: a booking in Bulgarian, an allergen question in English, and the allergy added to the reservation.</sub>
+<sub>Screenshots from a real session with Gemma 4 26B in LM Studio; the tool calls under each reply are the ones the model made.</sub>
 
 ![Sequence diagram of one chat turn](voice-restaurant-agent_diagram.svg)
 
@@ -59,8 +68,8 @@ python -m pytest
 
 | Model (local, LM Studio) | Passed | Median time per turn |
 |---|---|---|
-| Gemma 4 26B A4B (default) | **46/46** (23 cases × 2 runs) | 6.0 s |
-| Qwen 3.8 27B | **45/46** (23 cases × 2 runs; the failure is fixed, see below) | 23.7 s |
+| Gemma 4 26B A4B (default) | **56/56** (28 cases × 2 runs) | 6.6 s |
+| Qwen 3.8 27B | **56/56** (28 cases × 2 runs) | 30.5 s |
 
 Writing the evals found real problems, now fixed: a guest naming a restaurant left the agent without its ID (search by name added); Gemma dropped the dash when reading back a code like `R-34LST` (codes have no dash now); late at night Gemma told guests "I confirm your reservation" before booking anything (a prompt rule, checked by an eval that failed 2 of 4 runs before the fix and 0 of 4 after); Qwen sometimes translated restaurant names ("Стар Мил" for "Old Mill"), which a guest could not find; and after a longer prompt Gemma booked straight away when a guest said "Book a table…" (2 of 2 runs), so the confirmation rule moved into code: `book_table` only runs for details that `check_availability` offered in an earlier turn. The Qwen run also showed a privacy gap: looking up a code returned the guest's name, and Qwen said "booked under Maria" to whoever had the code; the lookup no longer returns names. Live tests also showed the agent only offering a colleague when a guest wanted a mistakenly cancelled booking back (now it offers the same table under a new code; 0 of 4 → 6 of 6), and asking "which restaurant?" right after the guest had asked for a restaurant's menu; an eval reproduced it when the conversation also held an earlier reservation (4 of 4 runs) and a prompt rule fixed it (6 of 6). An earlier live test also caught 19:30 being read back as "half past nine". Per-case results: [`evals/results/latest.md`](evals/results/latest.md).
 
@@ -82,3 +91,7 @@ Writing the evals found real problems, now fixed: a guest naming a restaurant le
 A local portfolio demo: no authentication on the staff view, sessions in memory, and text-to-speech sends reply text to an online service. A public deployment would need HTTPS, authentication, rate limits and persistent storage.
 
 Architecture, data model, booking rules and gotchas are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## License
+
+[MIT](LICENSE)
