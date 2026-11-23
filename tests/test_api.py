@@ -42,6 +42,20 @@ def test_booking_after_the_guest_confirms_shows_up_in_the_staff_view(client, fak
     assert reservations[0]["customer_name"] == "Alex" and reservations[0]["status"] == "confirmed"
 
 
+def test_an_identical_tool_call_repeated_in_one_turn_runs_once(client, fake_lm):
+    # Found by the eval: Qwen sent the same book_table call twice in one round and the guest got two tables.
+    rid = first_restaurant()
+    details = {"restaurant_id": rid, "date": "2026-11-21", "time": "19:30", "guests": 2}
+    fake_lm.script(("check_availability", details), reply="A table is available. Shall I book it?")
+    chat(client, "A table for 2 tomorrow at 19:30 under Alex")
+    booking = {**details, "customer_name": "Alex"}
+    fake_lm.script(("book_table", booking), ("book_table", dict(reversed(booking.items()))), reply="Booked.")
+    data = chat(client, "Yes, please book it")
+    assert [c["status"] for c in data["tool_calls"]] == ["success", "duplicate"]
+    assert len(client.get("/api/reservations").json()["reservations"]) == 1
+    assert "already made" in fake_lm.requests[-1]["messages"][-1]["content"]
+
+
 def test_booking_without_the_guests_yes_is_refused_in_code(client, fake_lm):
     rid = first_restaurant()
     details = {"restaurant_id": rid, "date": "2026-11-21", "time": "19:30", "guests": 2}

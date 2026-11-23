@@ -69,6 +69,20 @@ BOOK_WITHOUT_CONFIRMATION = json.dumps({
 })
 
 
+DUPLICATE_CALL = json.dumps({
+    "status": "duplicate",
+    "message": "This exact call was already made in this turn and was not run again; use its result above.",
+})
+
+
+def call_key(name: str, raw_arguments: str):
+    """Identifies a call by its tool and arguments, whatever the order of the keys."""
+    try:
+        return name, json.dumps(json.loads(raw_arguments or "{}"), sort_keys=True)
+    except json.JSONDecodeError:
+        return name, raw_arguments
+
+
 def run_llm_turn(turn_history: list, tool_calls: list, spoken_language: str = None, model: str = None):
     """Call the model, executing tool calls until it answers (or MAX_TOOL_ROUNDS is hit).
 
@@ -77,9 +91,12 @@ def run_llm_turn(turn_history: list, tool_calls: list, spoken_language: str = No
     Guard in code, not only in the prompt: book_table runs only for details that check_availability offered
     in an EARLIER turn, i.e. the guest has heard them and answered since. (In evals Gemma sometimes booked
     straight away when the guest said "Book a table ...".)
+    An identical call repeated in the same turn is not run again (in evals Qwen sent the same book_table call
+    twice in one round, which booked two tables).
     """
     last_user = max((i for i, m in enumerate(turn_history) if m.get("role") == "user"), default=0)
     offered_before = confirmed_offers(turn_history[:last_user])
+    done_this_turn = set()
     msg = None
     for _ in range(config.MAX_TOOL_ROUNDS + 1):
         response = llm_client.chat.completions.create(
@@ -92,10 +109,14 @@ def run_llm_turn(turn_history: list, tool_calls: list, spoken_language: str = No
             break
         turn_history.append(assistant_message_to_dict(msg))
         for tc in msg.tool_calls:
-            if tc.function.name == "book_table" and not booking_is_confirmed(tc.function.arguments, offered_before):
+            key = call_key(tc.function.name, tc.function.arguments)
+            if key in done_this_turn:
+                output = DUPLICATE_CALL
+            elif tc.function.name == "book_table" and not booking_is_confirmed(tc.function.arguments, offered_before):
                 output = BOOK_WITHOUT_CONFIRMATION
             else:
                 output = execute_tool_call(tc.function.name, tc.function.arguments)
+                done_this_turn.add(key)
             tool_calls.append({"name": tc.function.name, "arguments": tc.function.arguments or "{}", "result": output})
             turn_history.append({"role": "tool", "tool_call_id": tc.id, "content": output})
     return msg

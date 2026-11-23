@@ -173,11 +173,11 @@ python -m pytest                            # needs: python -m playwright instal
 * CI (`.github/workflows/tests.yml`) runs everything on every push.
 
 **LLM evals** (`python evals/run_evals.py [--repeat N] [--cases ...]`, LM Studio required):
-* 28 conversations in English, Bulgarian and German, each on fresh data with a frozen clock (a case can set its own clock), graded on reservations, tool calls and the reply.
+* 30 conversations in English, Bulgarian and German, each on fresh data with a frozen clock (a case can set its own clock), graded on reservations, tool calls and the reply.
 * `lead_in` turns run through the model before the graded turn, so the history holds real tool calls and results. A synthetic text history did **not** reproduce the early-confirmation problem below; real lead-in turns and the late-night clock did.
-* Problems found and fixed: no way to look a restaurant up by name; Gemma dropping the dash when reading back `R-34LST` (codes no longer have a dash); Gemma saying "Подтверждавам резервация" ("I confirm the reservation") before booking, seen near midnight (prompt rule; the eval failed 2/4 runs before and 0/4 after); Qwen translating restaurant names ("Стар Мил" for "Old Mill"; 1/4 runs before, 0/6 after, a rare failure); Gemma booking without asking after the prompt grew (2/2 runs; now blocked in code, see §7).
+* Problems found and fixed: no way to look a restaurant up by name; Gemma dropping the dash when reading back `R-34LST` (codes no longer have a dash); Gemma saying "Подтверждавам резервация" ("I confirm the reservation") before booking, seen near midnight (prompt rule; the eval failed 2/4 runs before and 0/4 after); Qwen translating restaurant names ("Стар Мил" for "Old Mill"; 1/4 runs before, 0/6 after, a rare failure); Gemma booking without asking after the prompt grew (2/2 runs; now blocked in code, see §7); an "events team" that does not exist in the handover wording (0/6 → 6/6 after the prompt and tool text said "the restaurant staff"); Qwen repeating an identical `book_table` call in one round, which booked two tables (1/2 runs; identical calls in a turn now run once, 4/4 after).
 * `--models` (default: both allowed models) loads each model in turn and loads Gemma again at the end.
-* Last full run (2026-11-23, 28 cases × 2): Gemma 4 26B **56/56**, median 6.6 s per turn; Qwen 3.8 27B **56/56**, median 30.5 s. An earlier Qwen failure (it read out the guest's name after looking up a code) was fixed by no longer returning the name from `find_reservation`. Results: `evals/results/latest.md`.
+* Last full run (2026-11-23, 30 cases × 2): Gemma 4 26B **60/60**, median 8.5 s per turn; Qwen 3.8 27B **59/60**, median 34.5 s; the failure (a duplicate booking) is fixed and the case re-measured 4/4. An earlier Qwen failure (it read out the guest's name after looking up a code) was fixed by no longer returning the name from `find_reservation`. Results: `evals/results/latest.md`.
 
 ---
 

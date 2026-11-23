@@ -50,12 +50,12 @@ Environment variables: `LLM_BASE_URL`, `LLM_MODEL`, `WHISPER_MODEL`, `RESTAURANT
 
 ## Testing
 
-**73 deterministic tests, about 14 s, no GPU, 87% line coverage** (`pytest --cov`). A scripted fake of LM Studio (`tests/fake_lmstudio.py`) replaces the model and the clock is frozen. CI runs them on every push.
+**74 deterministic tests, about 14 s, no GPU, 87% line coverage** (`pytest --cov`). A scripted fake of LM Studio (`tests/fake_lmstudio.py`) replaces the model and the clock is frozen. CI runs them on every push.
 
 | Suite | What it covers |
 |---|---|
 | `tests/test_tools.py` (23) | Booking rules (hours, last seating, past dates, 2-hour overlaps, alternatives), changes that do not count the booking itself, ownership checks (including misheard names), added names and change history, callback requests, search and price sorting, allergen filtering, menus and allergens per language, deterministic data |
-| `tests/test_api.py` (18) | Full turns over HTTP, booking refused without the guest's yes, session isolation, recovery from an LLM outage, internal errors hidden from the guest, tool-loop limit, history trimming, model switching, the chosen speech language |
+| `tests/test_api.py` (19) | Full turns over HTTP, booking refused without the guest's yes, a repeated identical call run only once, session isolation, recovery from an LLM outage, internal errors hidden from the guest, tool-loop limit, history trimming, model switching, the chosen speech language |
 | `tests/test_voice.py` (16) | Speech language limited to the six supported ones, the guest's choice skipping detection, Whisper loaded once on the CPU, the TTS voice for a typed conversation, Markdown not read aloud and reservation codes spelled out, TTS voice per language and gender, retries and a timeout per attempt (fake Whisper and edge-tts, no network) |
 | `tests/e2e/test_ui.py` (16, Playwright) | Tool chips, typing indicator, model output rendered as text (XSS), staff view after booking, changing and cancelling, callback requests, new conversation, outage message, TTS language, model selector and status, text size, speech language |
 
@@ -65,14 +65,14 @@ python -m playwright install chromium     # or, on Windows with Edge: add --brow
 python -m pytest --cov=restaurant --cov=server
 ```
 
-**LLM evals: does the real model behave?** `python evals/run_evals.py` runs 28 conversations in English, Bulgarian and German against the model in LM Studio, each on fresh data, graded on the reservations in the database, the tool calls and the reply.
+**LLM evals: does the real model behave?** `python evals/run_evals.py` runs 30 conversations in English, Bulgarian and German against the model in LM Studio, each on fresh data, graded on the reservations in the database, the tool calls and the reply.
 
 | Model (local, LM Studio) | Passed | Median time per turn |
 |---|---|---|
-| Gemma 4 26B A4B (default) | **56/56** (28 cases × 2 runs) | 6.6 s |
-| Qwen 3.8 27B | **56/56** (28 cases × 2 runs) | 30.5 s |
+| Gemma 4 26B A4B (default) | **60/60** (30 cases × 2 runs) | 8.5 s |
+| Qwen 3.8 27B | **59/60** (30 cases × 2 runs); the failure is fixed, see below | 34.5 s |
 
-Writing the evals found real problems, now fixed: a guest naming a restaurant left the agent without its ID (search by name added); Gemma dropped the dash when reading back a code like `R-34LST` (codes have no dash now); late at night Gemma told guests "I confirm your reservation" before booking anything (a prompt rule, checked by an eval that failed 2 of 4 runs before the fix and 0 of 4 after); Qwen sometimes translated restaurant names ("Стар Мил" for "Old Mill"), which a guest could not find; and after a longer prompt Gemma booked straight away when a guest said "Book a table…" (2 of 2 runs), so the confirmation rule moved into code: `book_table` only runs for details that `check_availability` offered in an earlier turn. The Qwen run also showed a privacy gap: looking up a code returned the guest's name, and Qwen said "booked under Maria" to whoever had the code; the lookup no longer returns names. Live tests also showed the agent only offering a colleague when a guest wanted a mistakenly cancelled booking back (now it offers the same table under a new code; 0 of 4 → 6 of 6), and asking "which restaurant?" right after the guest had asked for a restaurant's menu; an eval reproduced it when the conversation also held an earlier reservation (4 of 4 runs) and a prompt rule fixed it (6 of 6). An earlier live test also caught 19:30 being read back as "half past nine". Per-case results: [`evals/results/latest.md`](evals/results/latest.md).
+Writing the evals found real problems, now fixed: a guest naming a restaurant left the agent without its ID (search by name added); Gemma dropped the dash when reading back a code like `R-34LST` (codes have no dash now); late at night Gemma told guests "I confirm your reservation" before booking anything (a prompt rule, checked by an eval that failed 2 of 4 runs before the fix and 0 of 4 after); Qwen sometimes translated restaurant names ("Стар Мил" for "Old Mill"), which a guest could not find; and after a longer prompt Gemma booked straight away when a guest said "Book a table…" (2 of 2 runs), so the confirmation rule moved into code: `book_table` only runs for details that `check_availability` offered in an earlier turn. The Qwen run also showed a privacy gap: looking up a code returned the guest's name, and Qwen said "booked under Maria" to whoever had the code; the lookup no longer returns names. Live tests also showed the agent only offering a colleague when a guest wanted a mistakenly cancelled booking back (now it offers the same table under a new code; 0 of 4 → 6 of 6), and asking "which restaurant?" right after the guest had asked for a restaurant's menu; an eval reproduced it when the conversation also held an earlier reservation (4 of 4 runs) and a prompt rule fixed it (6 of 6). An earlier live test also caught 19:30 being read back as "half past nine". In a live test the agent promised an "events team" that does not exist; the words came from our own prompt and tool text, two evals reproduced it (0 of 6), and both now say "the restaurant staff" (6 of 6). The last full run found that Qwen sometimes sends the same `book_table` call twice in one round, and both ran, so the guest had two tables (1 of 2 runs); an identical call in the same turn is now not run again, and the case passed 4 of 4 runs afterwards, including one where Qwen repeated the call. Per-case results: [`evals/results/latest.md`](evals/results/latest.md).
 
 ## Project layout
 
