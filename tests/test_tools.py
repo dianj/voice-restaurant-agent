@@ -83,7 +83,7 @@ def test_booking_request_validation():
         (TOMORROW, "19:15", 2): "half hour",
         ("2027-03-01", "19:00", 2): "days ahead",
         (TOMORROW, "19:00", 0): "at least 1",
-        (TOMORROW, "19:00", 25): "events team",
+        (TOMORROW, "19:00", 25): "restaurant staff",
         (TOMORROW, "19:00", True): "whole number",
         ("21.11.2026", "19:00", 2): "YYYY-MM-DD",
         (TOMORROW, "7pm", 2): "HH:MM",

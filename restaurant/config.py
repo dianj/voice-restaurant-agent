@@ -29,7 +29,7 @@ MAX_HISTORY_TURNS = 12
 SITTING_MINUTES = 120          # how long a table is blocked by one reservation
 LAST_SEATING_BEFORE_CLOSE = 60 # minutes: the last booking must start at least this long before closing
 MAX_DAYS_AHEAD = 60
-MIN_GUESTS, MAX_GUESTS = 1, 20 # bigger groups go to the events team (a human)
+MIN_GUESTS, MAX_GUESTS = 1, 20 # bigger groups go to the restaurant staff (a human)
 SLOT_STEP_MINUTES = 30         # bookings start on :00 or :30
 
 # --- Voice ---

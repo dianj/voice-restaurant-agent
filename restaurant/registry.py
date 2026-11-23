@@ -92,7 +92,7 @@ TOOLS_SCHEMA = [
     }},
     {"type": "function", "function": {
         "name": "request_callback",
-        "description": "Hand the guest over to a human: save a request for a colleague to contact them. Use it for "
+        "description": "Hand the guest over to a human: save a request for the restaurant staff to contact them. Use it for "
                        "events and parties, groups over 20, and anything you cannot do yourself. Collect the name, "
                        "a phone number or email and what it is about, read them back, and call this only after the "
                        "guest says yes. Until it succeeds, never say the request was passed on.",

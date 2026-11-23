@@ -112,7 +112,7 @@ def parse_booking_request(restaurant, date_text, time_text, guests):
         return None, None, "guests must be at least 1."
     if guests > config.MAX_GUESTS:
         return None, None, (f"Online bookings are limited to {config.MAX_GUESTS} guests. "
-                            "Larger groups are handled by the events team: offer a callback (request_callback).")
+                            "Larger groups are handled by the restaurant staff: offer a callback (request_callback).")
     try:
         day = date_cls.fromisoformat(str(date_text).strip())
     except ValueError:
@@ -407,7 +407,7 @@ def find_reservation(code: str):
 NOT_FOUND = "No reservation with code '{code}'. Ask the guest to repeat the code (format R followed by 5 letters/digits, e.g. R34LST)."
 WRONG_NAME = ("The name does not match this reservation. Speech recognition may have misheard it: ask the guest to "
               "spell the name or type it in the chat. Do not repeat the code or the stored name to the guest. "
-              "If it still does not match, offer a callback from a colleague (request_callback).")
+              "If it still does not match, offer a callback from the restaurant staff (request_callback).")
 
 _CYRILLIC_TO_LATIN = dict(zip("абвгдежзийклмнопрстуфхцчшщъьюя",
                               ["a", "b", "v", "g", "d", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r",
@@ -577,7 +577,7 @@ def request_callback(kind: str, customer_name: str, contact: str, details: str, 
     if not isinstance(customer_name, str) or not 2 <= len(customer_name.strip()) <= 80:
         return error("customer_name is required (2-80 characters). Ask the guest for their name.")
     if not valid_contact(contact):
-        return error("contact must be a phone number or an email address. Ask the guest how a colleague can reach them.")
+        return error("contact must be a phone number or an email address. Ask the guest how the restaurant staff can reach them.")
     if not isinstance(details, str) or not 5 <= len(details.strip()) <= 500:
         return error("details must say in a sentence what the request is about (5-500 characters).")
     day = None
@@ -600,7 +600,7 @@ def request_callback(kind: str, customer_name: str, contact: str, details: str, 
              guests, city.strip() if city else None, now().isoformat(timespec="seconds")),
         )
     return result("success", request_number=cursor.lastrowid, contact=str(contact).strip(),
-                  note="Saved for the team. Tell the guest a colleague will contact them; do not promise a time.")
+                  note="Saved for the restaurant staff. Tell the guest the restaurant staff will contact them; do not promise a time.")
 
 
 def list_requests(limit: int = 50) -> list:

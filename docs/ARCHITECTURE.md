@@ -100,7 +100,7 @@ Locations: Sofia (Center, Lozenets, Vitosha Blvd), Plovdiv (Old Town, Kapana), V
 
 **Rules** (`restaurant/config.py`):
 * Bookings start on `:00` or `:30`, between opening time and closing time minus 60 minutes.
-* Not in the past; at most 60 days ahead; 1–20 guests (more → a callback request for the events team).
+* Not in the past; at most 60 days ahead; 1–20 guests (more → a callback request for the restaurant staff).
 * A reservation blocks its seats for 120 minutes: another booking overlaps if the start times are less than 120 minutes apart. Seats taken = sum of overlapping confirmed guests; the limit is `seating_capacity`.
 * Codes: `R` + 5 characters from an alphabet without `0/O` and `1/I`, with at least one digit. Lookups accept `r34lst`, `R-34LST`, `R 3 4 L S T` and `34LST`.
 * The booking name is the ownership check for changes and cancellations. It is compared on a Latin, letters-only key with a similarity of at least 0.85 (names of 5+ letters), because speech recognition heard "Хано Споруха" at booking and "Хано Спаруха" when cancelling. A different name does not match. On a mismatch the agent asks the guest to spell or type the name, then offers a colleague.

@@ -65,6 +65,15 @@ def mentions(text, *words):
     return any(w in lower for w in words)
 
 
+# A colleague really calls back (request_callback), but there is no events team, department or specialist.
+INVENTED_TEAM = ("events team", "event team", "events department", "event specialist", "events specialist",
+                 "event coordinator", "events coordinator", "event planner", "events manager", "event manager")
+
+
+def no_invented_team(run):
+    return not any(mentions(text, *INVENTED_TEAM) for text in run["lead_replies"] + [run["reply"]])
+
+
 def reservations(run):
     return run["reservations"]
 
@@ -207,10 +216,22 @@ CASES = [
          lead_in=("Имам въпрос относно организиране на детско парти в ресторант в София.",)),
     Case("event-callback-bg", "Да, моля.",
          lambda r: len(r["requests"]) == 1 and "0888" in r["requests"][0]["contact"]
-         and "иван" in r["requests"][0]["customer_name"].lower() and mentions(r["reply"], "колег", "екип", "свърж"),
+         and "иван" in r["requests"][0]["customer_name"].lower() and mentions(r["reply"], "персонал", "колег", "екип", "свърж"),
          "saves a callback request with the name and phone, so a colleague really can call back",
          lead_in=("Имам въпрос относно организиране на детско парти в ресторант в София.",
                   "Ще са около 25 деца, в събота следобед. Казвам се Иван Петров, телефонът ми е 0888 123 456.")),
+    Case("event-no-invented-team", "Hi! I'd like to book the whole restaurant at Marble Hearth for a company party "
+                                   "of 45 people next Friday.",
+         lambda r: not reservations(r) and not r["requests"] and no_invented_team(r)
+         and mentions(r["reply"], "phone", "email", "e-mail", "contact", "reach"),
+         "asks how the staff can reach the guest, without inventing an 'events team' (seen in a live test)"),
+    Case("event-callback-staff-en", "Yes, that's right.",
+         lambda r: len(r["requests"]) == 1 and "765" in r["requests"][0]["contact"] and no_invented_team(r)
+         and mentions(r["reply"], "staff", "colleague", "restaurant"),
+         "saves the callback and says the restaurant staff will call, not an 'events team' (seen in a live test)",
+         lead_in=("Hi! I'd like to book the whole restaurant at Marble Hearth for a company party of 45 people "
+                  "next Friday.",
+                  "My name is Daniel Ivanov, phone +359 88 765 4321. It's a Christmas party with dinner and drinks.")),
 
     # --- menu and allergens ---
     Case("menu-in-guest-language-bg", "Какво има в менюто на Olive Fork?",
@@ -279,11 +300,12 @@ def run_case(case, model):
     tools.now = lambda: clock
     context = case.setup() if case.setup else {}
     history = [{"role": role, "content": text.format(**context)} for role, text in case.history]
-    tool_calls = []
+    tool_calls, lead_replies = [], []
     try:
         for text in case.lead_in:
             history.append({"role": "user", "content": text.format(**context)})
-            history.append({"role": "assistant", "content": agent.run_llm_turn(history, [], model=model).content or ""})
+            lead_replies.append(agent.run_llm_turn(history, [], model=model).content or "")
+            history.append({"role": "assistant", "content": lead_replies[-1]})
     except Exception as e:
         return {"case": case.id, "outcome": "error", "reply": "", "tools": [], "reservations": [], "requests": [], "seconds": 0,
                 "error": f"lead-in failed: {e}"}
@@ -294,7 +316,7 @@ def run_case(case, model):
         reply, error = (msg.content or ""), None
     except Exception as e:
         reply, error = "", str(e)
-    run = {"reply": reply, "tools": tool_calls, "reservations": tools.list_reservations(), "requests": tools.list_requests(),
+    run = {"reply": reply, "lead_replies": lead_replies, "tools": tool_calls, "reservations": tools.list_reservations(), "requests": tools.list_requests(),
            "seconds": time.time() - started, "error": error}
     try:
         passed = error is None and bool(case.check(run))
