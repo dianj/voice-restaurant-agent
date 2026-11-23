@@ -6,3 +6,4 @@ openai>=3.57,<4
 faster-whisper>=1.2.1,<2
 av<19  # faster-whisper 1.2.x passes metadata_errors, removed in PyAV 19
 edge-tts>=7.3,<8
+httpx>=0.28.1,<1
