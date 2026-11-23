@@ -175,7 +175,7 @@ python -m pytest                            # needs: python -m playwright instal
 * `lead_in` turns run through the model before the graded turn, so the history holds real tool calls and results. A synthetic text history did **not** reproduce the early-confirmation problem below; real lead-in turns and the late-night clock did.
 * Problems found and fixed: no way to look a restaurant up by name; Gemma dropping the dash when reading back `R-34LST` (codes no longer have a dash); Gemma saying "Подтверждавам резервация" ("I confirm the reservation") before booking, seen near midnight (prompt rule; the eval failed 2/4 runs before and 0/4 after); Qwen translating restaurant names ("Стар Мил" for "Old Mill"; 1/4 runs before, 0/6 after, a rare failure); Gemma booking without asking after the prompt grew (2/2 runs; now blocked in code, see §7).
 * `--models` (default: both allowed models) loads each model in turn and loads Gemma again at the end.
-* Last runs (23 cases × 2): Gemma 4 26B **46/46**, median 6.0 s per turn; Qwen 3.8 27B **45/46**, median 23.7 s. Qwen's failure: it read out the guest's name after looking up a code. Fixed by no longer returning the name from `find_reservation`; the four reservation cases then passed 12/12 on both models. Results: `evals/results/latest.md`.
+* Last full run (2026-11-23, 28 cases × 2): Gemma 4 26B **56/56**, median 6.6 s per turn; Qwen 3.8 27B **56/56**, median 30.5 s. An earlier Qwen failure (it read out the guest's name after looking up a code) was fixed by no longer returning the name from `find_reservation`. Results: `evals/results/latest.md`.
 
 ---
 
