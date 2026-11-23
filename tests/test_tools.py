@@ -11,7 +11,8 @@ def call(fn, *args, **kwargs):
 
 def restaurant(where: str = "1 = 1", params=()):
     with tools.db() as conn:
-        return dict(conn.execute(f"SELECT * FROM restaurants WHERE {where} ORDER BY restaurant_id LIMIT 1", params).fetchone())
+        query = f"SELECT * FROM restaurants WHERE {where} ORDER BY restaurant_id LIMIT 1"
+        return dict(conn.execute(query, params).fetchone())
 
 
 TOMORROW = "2026-11-21"
@@ -120,7 +121,8 @@ def test_booking_is_saved_and_can_be_found_and_cancelled_by_its_owner():
         assert call(tools.find_reservation, variant)["reservation"]["code"] == code, variant
     found = call(tools.find_reservation, code)
     assert "Alex" not in json.dumps(found) and "customer_name" not in found["reservation"]
-    assert found["reservation"]["restaurant_id"] == rid  # so a cancelled booking can be checked and booked again  # the code alone does not reveal who booked
+    # so a cancelled booking can be checked and booked again; the code alone does not reveal who booked
+    assert found["reservation"]["restaurant_id"] == rid
     assert found["reservation"]["notes"] == "gluten allergy"
 
     assert call(tools.cancel_reservation, code, "Someone Else")["status"] == "error"
@@ -154,7 +156,8 @@ def test_booking_requires_a_name():
 
 def book_at_10_to_22(name="Alex", time="19:00", guests=2):
     r = restaurant("seating_capacity = 20 AND opening_hours = '10:00-22:00'")
-    return r["restaurant_id"], call(tools.book_table, r["restaurant_id"], name, TOMORROW, time, guests)["reservation_code"]
+    booked = call(tools.book_table, r["restaurant_id"], name, TOMORROW, time, guests)
+    return r["restaurant_id"], booked["reservation_code"]
 
 
 def test_note_is_appended_only_for_the_owner():
@@ -186,7 +189,8 @@ def test_callback_request_needs_a_name_and_a_way_to_reach_the_guest():
     ok = call(tools.request_callback, "event", "Иван Петров", "+359 888 123 456", "Детско парти за 25 деца в събота",
               date="2026-11-28", guests=25, city="Sofia")
     assert ok["status"] == "success" and ok["request_number"] == 1
-    assert call(tools.request_callback, "other", "Ana", "ana@example.com", "Wants a private room")["status"] == "success"
+    saved = call(tools.request_callback, "other", "Ana", "ana@example.com", "Wants a private room")
+    assert saved["status"] == "success"
     for contact in ("", "call me", "123", "ana@example", "0888 123 456 789 012 345"):
         assert "contact" in call(tools.request_callback, "event", "Ana", contact, "A party")["message"], contact
     assert call(tools.request_callback, "party", "Ana", "0888123456", "A party")["status"] == "error"   # unknown kind
@@ -257,7 +261,8 @@ def test_price_per_person_is_two_courses_at_the_median_rounded_to_5():
 
 
 def test_allergen_names_follow_the_guest_language():
-    rid = restaurant("restaurant_id IN (SELECT restaurant_id FROM menu_items WHERE allergens LIKE '%celery%')")["restaurant_id"]
+    with_celery = "restaurant_id IN (SELECT restaurant_id FROM menu_items WHERE allergens LIKE '%celery%')"
+    rid = restaurant(with_celery)["restaurant_id"]
     bulgarian = call(tools.get_menu, rid, language="bg", avoid_allergens=["celery"])
     named = {a for d in bulgarian["dishes"] for a in d["allergens"]}
     assert "целина" in named and "celery" not in named          # not the non-word "селера"

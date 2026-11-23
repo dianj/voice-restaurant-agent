@@ -8,8 +8,9 @@ import random
 import re
 import sqlite3
 from contextlib import contextmanager
+from datetime import date as date_cls
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
-from datetime import date as date_cls, datetime, timedelta
 
 from . import config
 from .data import ALLERGEN_NAMES, ALLERGENS, CUISINES, LOCATIONS, NO_ALLERGENS
@@ -124,7 +125,8 @@ def parse_booking_request(restaurant, date_text, time_text, guests):
     except ValueError:
         return None, None, "time must be in HH:MM format (24-hour clock)."
     if start % config.SLOT_STEP_MINUTES:
-        return None, None, f"Bookings start on the hour or half hour (e.g. {hhmm(start - start % 30)} or {hhmm(start - start % 30 + 30)})."
+        earlier = start - start % 30
+        return None, None, f"Bookings start on the hour or half hour (e.g. {hhmm(earlier)} or {hhmm(earlier + 30)})."
 
     opens, closes = opening_window(restaurant["opening_hours"])
     last_seating = closes - config.LAST_SEATING_BEFORE_CLOSE
@@ -181,7 +183,8 @@ def alternative_times(conn, restaurant, day: str, wanted: int, guests: int, limi
     for start in sorted(candidates, key=lambda m: (abs(m - wanted), m)):
         if start == wanted or base + timedelta(minutes=start) <= current:
             continue
-        if seats_taken(conn, restaurant["restaurant_id"], day, start, exclude_code) + guests <= restaurant["seating_capacity"]:
+        taken = seats_taken(conn, restaurant["restaurant_id"], day, start, exclude_code)
+        if taken + guests <= restaurant["seating_capacity"]:
             free.append(hhmm(start))
         if len(free) == limit:
             break
@@ -335,7 +338,8 @@ def check_availability(restaurant_id: str, date: str, time: str, guests: int):
         if problem:
             return error(problem)
         day = str(date).strip()
-        free = restaurant["seating_capacity"] - seats_taken(conn, restaurant["restaurant_id"], day, booking_minute(day, when))
+        taken = seats_taken(conn, restaurant["restaurant_id"], day, booking_minute(day, when))
+        free = restaurant["seating_capacity"] - taken
         base = {"restaurant": restaurant["name"], "restaurant_id": restaurant["restaurant_id"],
                 "date": when.date().isoformat(), "time": when.strftime("%H:%M"), "guests": guests}
         if guests <= free:
@@ -401,17 +405,19 @@ def find_reservation(code: str):
     if not row:
         return error(NOT_FOUND.format(code=code))
     return result("success", reservation=dict(row),
-                  note="The booking name is not shown. To change or cancel, ask the guest for the name it was booked under.")
+                  note="The booking name is not shown. To change or cancel, ask the guest for the name it was "
+                       "booked under.")
 
 
-NOT_FOUND = "No reservation with code '{code}'. Ask the guest to repeat the code (format R followed by 5 letters/digits, e.g. R34LST)."
+NOT_FOUND = ("No reservation with code '{code}'. Ask the guest to repeat the code "
+             "(format R followed by 5 letters/digits, e.g. R34LST).")
 WRONG_NAME = ("The name does not match this reservation. Speech recognition may have misheard it: ask the guest to "
               "spell the name or type it in the chat. Do not repeat the code or the stored name to the guest. "
               "If it still does not match, offer a callback from the restaurant staff (request_callback).")
 
 _CYRILLIC_TO_LATIN = dict(zip("абвгдежзийклмнопрстуфхцчшщъьюя",
                               ["a", "b", "v", "g", "d", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r",
-                               "s", "t", "u", "f", "h", "ts", "ch", "sh", "sht", "a", "", "yu", "ya"]))
+                               "s", "t", "u", "f", "h", "ts", "ch", "sh", "sht", "a", "", "yu", "ya"], strict=True))
 
 
 def name_key(name) -> str:
@@ -499,7 +505,8 @@ def update_reservation(code: str, customer_name: str, add_note: str = None, date
                 return error(problem)
             day = str(new_date).strip()
             minute = booking_minute(day, when)
-            if seats_taken(conn, restaurant["restaurant_id"], day, minute, code) + new_guests > restaurant["seating_capacity"]:
+            taken = seats_taken(conn, restaurant["restaurant_id"], day, minute, code)
+            if taken + new_guests > restaurant["seating_capacity"]:
                 alternatives = alternative_times(conn, restaurant, day, minute, new_guests, exclude_code=code)
                 conn.execute("ROLLBACK")
                 return result("unavailable", available=False, reservation_code=code, date=day,
@@ -523,7 +530,8 @@ def update_reservation(code: str, customer_name: str, add_note: str = None, date
         final = {"date": row["date"], "time": row["time"], "guests": row["guests"], **changed}
         stamp = now().isoformat(timespec="seconds")
         history = json.loads(row["history"] or "[]")
-        history += [{"at": stamp, "change": f"{field}: {row[field]} -> {value}"} for field, value in sorted(changed.items())]
+        history += [{"at": stamp, "change": f"{field}: {row[field]} -> {value}"}
+                    for field, value in sorted(changed.items())]
         if new_name:
             names.append(new_name)
             history.append({"at": stamp, "change": f"name added: {new_name}"})
@@ -577,7 +585,8 @@ def request_callback(kind: str, customer_name: str, contact: str, details: str, 
     if not isinstance(customer_name, str) or not 2 <= len(customer_name.strip()) <= 80:
         return error("customer_name is required (2-80 characters). Ask the guest for their name.")
     if not valid_contact(contact):
-        return error("contact must be a phone number or an email address. Ask the guest how the restaurant staff can reach them.")
+        return error("contact must be a phone number or an email address. "
+                     "Ask the guest how the restaurant staff can reach them.")
     if not isinstance(details, str) or not 5 <= len(details.strip()) <= 500:
         return error("details must say in a sentence what the request is about (5-500 characters).")
     day = None
@@ -600,7 +609,8 @@ def request_callback(kind: str, customer_name: str, contact: str, details: str, 
              guests, city.strip() if city else None, now().isoformat(timespec="seconds")),
         )
     return result("success", request_number=cursor.lastrowid, contact=str(contact).strip(),
-                  note="Saved for the restaurant staff. Tell the guest the restaurant staff will contact them; do not promise a time.")
+                  note="Saved for the restaurant staff. Tell the guest the restaurant staff will contact them; "
+                       "do not promise a time.")
 
 
 def list_requests(limit: int = 50) -> list:

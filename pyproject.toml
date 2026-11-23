@@ -1,0 +1,16 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# FastAPI declares form fields and uploads with calls in default arguments (File(), Form()).
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Text the model reads (system prompt, tool schemas, demo data, eval cases) reads best one rule per line;
+# wrapping would make it harder to review what the model actually sees.
+"restaurant/agent.py" = ["E501"]
+"restaurant/registry.py" = ["E501"]
+"restaurant/data.py" = ["E501"]
+"evals/run_evals.py" = ["E501"]

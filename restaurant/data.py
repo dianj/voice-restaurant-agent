@@ -55,7 +55,7 @@ _ALLERGEN_TERMS = {
     "it": ("glutine", "crostacei", "uova", "pesce", "arachidi", "soia", "latte", "frutta a guscio",
            "sedano", "senape", "sesamo", "solfiti", "lupini", "molluschi"),
 }
-ALLERGEN_NAMES = {lang: dict(zip(ALLERGENS, terms)) for lang, terms in _ALLERGEN_TERMS.items()}
+ALLERGEN_NAMES = {lang: dict(zip(ALLERGENS, terms, strict=True)) for lang, terms in _ALLERGEN_TERMS.items()}
 NO_ALLERGENS = {"en": "none declared", "bg": "няма декларирани", "de": "keine angegeben",
                 "es": "ninguno declarado", "fr": "aucun déclaré", "it": "nessuno dichiarato"}
 

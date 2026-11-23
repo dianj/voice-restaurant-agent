@@ -204,6 +204,7 @@ def test_chosen_speech_language_is_passed_to_transcription(client, fake_lm, monk
 
 def test_fixed_language_skips_whisper_language_detection(monkeypatch):
     import faster_whisper
+
     from restaurant import voice
 
     class FakeModel:

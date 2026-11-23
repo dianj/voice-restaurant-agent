@@ -115,7 +115,7 @@ async def synthesize_speech(text: str, language: str, gender: str):
             if audio:
                 return audio, None
             last_error = "empty audio"
-        except asyncio.TimeoutError:
+        except TimeoutError:
             last_error = f"timeout after {config.TTS_ATTEMPT_TIMEOUT}s"
         except Exception as e:
             last_error = str(e)

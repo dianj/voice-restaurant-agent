@@ -19,9 +19,9 @@ import statistics
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Optional
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -138,8 +138,8 @@ class Case:
     check: Callable[[dict], bool]
     note: str
     history: tuple = ()                        # earlier (role, text) turns; may use {code} from setup
-    setup: Optional[Callable[[], dict]] = None  # seeds data; returned values fill {placeholders}
-    now: Optional[datetime] = None             # clock for this case (default: NOW)
+    setup: Callable[[], dict] | None = None  # seeds data; returned values fill {placeholders}
+    now: datetime | None = None             # clock for this case (default: NOW)
     lead_in: tuple = ()                        # earlier user turns that really run through the model first,
                                                # so the history holds real tool calls and results
 

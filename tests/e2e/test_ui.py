@@ -33,7 +33,8 @@ def restaurant_10_to_22():
 
 
 def test_reply_shows_tool_calls_with_their_arguments(page: Page, app_url, fake_lm):
-    fake_lm.script(("search_restaurants", {"city": "Sofia", "cuisine": "Italian"}), reply="Marble Hearth is a great choice.")
+    fake_lm.script(("search_restaurants", {"city": "Sofia", "cuisine": "Italian"}),
+                   reply="Marble Hearth is a great choice.")
     open_app(page, app_url)
     send(page, "Italian in Sofia")
     expect(last_bot(page)).to_contain_text("Marble Hearth is a great choice.")

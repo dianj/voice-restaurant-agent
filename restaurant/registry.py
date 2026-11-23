@@ -3,8 +3,16 @@ import json
 import logging
 
 from .data import ALLERGENS, CUISINES, LOCATIONS
-from .tools import (book_table, cancel_reservation, check_availability, find_reservation, get_menu, request_callback,
-                    search_restaurants, update_reservation)
+from .tools import (
+    book_table,
+    cancel_reservation,
+    check_availability,
+    find_reservation,
+    get_menu,
+    request_callback,
+    search_restaurants,
+    update_reservation,
+)
 
 AREAS = sorted({area for areas in LOCATIONS.values() for area in areas})
 
