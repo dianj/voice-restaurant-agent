@@ -1,0 +1,20 @@
+{
+  "question_id": "restaurant.confirm_booking",
+  "model": "qwen3.8-27b",
+  "prompt_hash": "08de156eb30a",
+  "temperature": 1.0,
+  "n_cases": 26,
+  "fitted_at": "2026-11-23T23:50:22.209265+00:00",
+  "metrics_before": {
+    "n": 26,
+    "accuracy": 1.0,
+    "ece": 0.004,
+    "brier": 0.0004
+  },
+  "metrics_after": {
+    "n": 26,
+    "accuracy": 1.0,
+    "ece": 0.004,
+    "brier": 0.0004
+  }
+}

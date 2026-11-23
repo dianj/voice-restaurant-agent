@@ -1,0 +1,20 @@
+{
+  "question_id": "restaurant.confirm_booking",
+  "model": "gemma-4-26b-a4b-it",
+  "prompt_hash": "08de156eb30a",
+  "temperature": 4.989,
+  "n_cases": 26,
+  "fitted_at": "2026-11-23T23:48:55.701292+00:00",
+  "metrics_before": {
+    "n": 26,
+    "accuracy": 0.9231,
+    "ece": 0.0767,
+    "brier": 0.1534
+  },
+  "metrics_after": {
+    "n": 26,
+    "accuracy": 0.9231,
+    "ece": 0.0734,
+    "brier": 0.1085
+  }
+}

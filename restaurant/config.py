@@ -25,6 +25,11 @@ MAX_TOOL_ROUNDS = 6
 # Older turns are dropped (whole user turns only, so tool-call pairs stay complete).
 MAX_HISTORY_TURNS = 12
 
+# --- Booking gate (docs/DECISIONS.md): a calibrated check that the guest said yes before book_table runs ---
+DECISION_GATE = os.environ.get("DECISION_GATE", "1") == "1"
+CALIBRATION_DIR = os.path.join(BASE_DIR, os.environ.get("CALIBRATION_DIR", "evals/decisions/calibration"))
+DECISION_TIMEOUT_SECONDS = float(os.environ.get("DECISION_TIMEOUT_SECONDS", "30"))
+
 # --- Reservation rules ---
 SITTING_MINUTES = 120          # how long a table is blocked by one reservation
 LAST_SEATING_BEFORE_CLOSE = 60 # minutes: the last booking must start at least this long before closing

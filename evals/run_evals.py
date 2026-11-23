@@ -331,6 +331,7 @@ def main():
     parser.add_argument("--models", nargs="*", default=[m for m, _ in config.ALLOWED_MODELS])
     parser.add_argument("--cases", nargs="*", help="run only these case ids")
     parser.add_argument("--repeat", type=int, default=1, help="runs per case (LLM output varies between runs)")
+    parser.add_argument("--output", default="latest", help="name of the summary file in evals/results/")
     args = parser.parse_args()
     cases = [c for c in CASES if not args.cases or c.id in args.cases]
     labels = dict(config.ALLOWED_MODELS)
@@ -359,7 +360,7 @@ def main():
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d")
-    with open(os.path.join(RESULTS_DIR, f"results-{stamp}.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(RESULTS_DIR, f"{'results' if args.output == 'latest' else args.output}-{stamp}.json"), "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
     lines = [f"# Eval results ({stamp})", "",
@@ -379,7 +380,7 @@ def main():
         cells = ["".join({"pass": "✅", "fail": "❌", "error": "⚠️"}[r["outcome"]]
                          for r in results[model] if r["case"] == case.id) for model in results]
         lines.append(f"| `{case.id}` | {case.note} | " + " | ".join(cells) + " |")
-    with open(os.path.join(RESULTS_DIR, "latest.md"), "w", encoding="utf-8", newline="\n") as f:
+    with open(os.path.join(RESULTS_DIR, f"{args.output}.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
     print("\n" + "\n".join(lines))
 

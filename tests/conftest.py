@@ -23,6 +23,7 @@ _TMP_DIR = tempfile.mkdtemp(prefix="restaurant-tests-")
 _FAKE = FakeLMStudio().start()
 os.environ["RESTAURANT_DB_PATH"] = os.path.join(_TMP_DIR, "test_restaurant.db")
 os.environ["LLM_BASE_URL"] = _FAKE.base_url
+os.environ["DECISION_GATE"] = "0"  # the booking gate has its own tests (tests/test_booking_gate.py)
 
 import server  # noqa: E402  (must come after the environment is prepared)
 from restaurant import config, data, lmstudio, tools  # noqa: E402
@@ -77,3 +78,9 @@ def app_url(fake_lm):
     yield f"http://127.0.0.1:{port}"
     uv.should_exit = True
     thread.join(timeout=5)
+
+
+def pytest_collection_modifyitems(items):
+    """Browser tests last: Playwright's sync API leaves an event loop running in the main thread, after which
+    asyncio.run() (the booking gate's tests) would fail."""
+    items.sort(key=lambda item: "e2e" in item.nodeid.split("::")[0])
