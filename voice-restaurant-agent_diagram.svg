@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1410 1176" width="1410" height="1176" role="img" aria-label="Sequence diagram of one chat turn of the voice restaurant concierge">
-<title>One chat turn: voice or text in, tool-calling loop over the booking rules and a calibrated booking gate, reply and optional voice out</title>
+<title>One chat turn: voice or text in, tool-calling loop over the booking rules, a calibrated booking gate and a wants-a-person gate, reply and optional voice out</title>
 <style>
   svg { background: #141210; }
   text { font-family: "Segoe UI", Roboto, Arial, sans-serif; fill: #f3ede4; }
@@ -113,4 +113,7 @@
 <path d="M 25 836 h 52 v 14 l -8 8 h -44 z" class="badge"/>
 <text x="33" y="847" class="badge-text">opt</text>
 <text x="87" y="847" class="guard">[voice replies on]</text>
+<rect x="860" y="688" width="515" height="38" rx="4" class="note"/>
+<text x="870" y="703" class="edge-label note-text">every turn, in parallel: wants-a-person gate (one letter, p ≥ 0.5)</text>
+<text x="870" y="717" class="edge-label note-text">asked for a person, no request_callback → one more call: start the callback</text>
 </svg>
