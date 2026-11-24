@@ -19,17 +19,23 @@ def client(app_url):
 
 
 class GateModel:
-    """`answers` for "does the guest agree?", `flags` for "is there text addressed to the system?"."""
+    """`answers` for "does the guest agree?", `flags` for "is there text addressed to the system?", `humans` for
+    "does the guest ask for a person?" (default for both: clearly not)."""
 
     def __init__(self):
-        self.answers, self.flags, self.requests = [], [], []
+        self.answers, self.flags, self.humans, self.requests, self.human_requests = [], [], [], [], []
 
     def handle(self, request):
         body = json.loads(request.content)
-        self.requests.append(body)
-        if "addressed to the system" in body["messages"][0]["content"]:
+        system = body["messages"][0]["content"]
+        if "ask to talk to a human" in system:
+            self.human_requests.append(body)
+            answer = self.humans.pop(0) if self.humans else {"N": 0.99, "Y": 0.01}
+        elif "addressed to the system" in system:
+            self.requests.append(body)
             answer = self.flags.pop(0) if self.flags else {"N": 0.99, "Y": 0.01}
         else:
+            self.requests.append(body)
             answer = self.answers.pop(0)
         if isinstance(answer, int):
             return httpx.Response(answer)
@@ -41,7 +47,7 @@ class GateModel:
 @pytest.fixture
 def gate(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "DECISION_GATE", True)
-    for question in (decisions.CONFIRM_BOOKING, decisions.INSTRUCTION):
+    for question in (decisions.CONFIRM_BOOKING, decisions.INSTRUCTION, decisions.WANTS_HUMAN):
         Calibration(question.id, config.MODEL_NAME, question.prompt_hash(), 1.0, 40, "2026-11-24", {}, {}
                     ).save(tmp_path)
     model = GateModel()

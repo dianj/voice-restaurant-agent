@@ -1,6 +1,7 @@
 """The agent: the tool-calling loop, the booking confirmation gate and history trimming.
 
 The system prompt is in prompts.py."""
+import concurrent.futures
 import json
 
 from openai import OpenAI
@@ -12,6 +13,7 @@ from .registry import execute_tool_call
 from .tool_schemas import TOOLS_SCHEMA
 
 llm_client = OpenAI(base_url=config.LLM_BASE_URL, api_key="lm-studio", timeout=config.LLM_TIMEOUT_SECONDS)
+_gate_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="wants-human")
 
 def assistant_message_to_dict(msg) -> dict:
     """Convert an SDK message object to a plain dict that can be safely re-sent."""
@@ -130,20 +132,29 @@ def run_llm_turn(turn_history: list, tool_calls: list, spoken_language: str = No
     An identical call repeated in the same turn is not run again (in evals Qwen sent the same book_table call
     twice in one round, which booked two tables).
     Then a calibrated booking gate (decisions.py) checks that the guest's latest message really agrees.
+    In parallel, a "wants a person" gate: if the guest asked for one and no request_callback ran in this turn, the
+    model is called once more with an instruction to start the handover steps.
     """
     last_user = max((i for i, m in enumerate(turn_history) if m.get("role") == "user"), default=0)
     guest_text = str(turn_history[last_user].get("content") or "") if turn_history else ""
     offered_before = confirmed_offers(turn_history[:last_user])
     done_this_turn = set()
+    wants_human = start_wants_human_gate(guest_text, turn_history[:last_user], model)
+    hint = ""
     msg = None
-    for _ in range(config.MAX_TOOL_ROUNDS + 1):
+    calls_left = config.MAX_TOOL_ROUNDS + 1
+    while calls_left > 0:
+        calls_left -= 1
         response = llm_client.chat.completions.create(
             model=model or config.MODEL_NAME,
-            messages=[{"role": "system", "content": build_system_prompt(spoken_language)}] + turn_history,
+            messages=[{"role": "system", "content": build_system_prompt(spoken_language) + hint}] + turn_history,
             tools=TOOLS_SCHEMA,
         )
         msg = response.choices[0].message
         if not msg.tool_calls:
+            if wants_human is not None and not hint and needs_handover_step(wants_human, tool_calls, decisions_log):
+                hint, calls_left = decisions.HANDOVER_HINT, calls_left + 1   # one more call, this answer is dropped
+                continue
             break
         turn_history.append(assistant_message_to_dict(msg))
         for tc in msg.tool_calls:
@@ -162,6 +173,25 @@ def run_llm_turn(turn_history: list, tool_calls: list, spoken_language: str = No
             tool_calls.append({"name": tc.function.name, "arguments": tc.function.arguments or "{}", "result": output})
             turn_history.append({"role": "tool", "tool_call_id": tc.id, "content": output})
     return msg
+
+
+def start_wants_human_gate(guest_text: str, earlier: list, model: str | None):
+    """Ask "does the guest ask for a person?" in a worker thread while the agent answers. None when off."""
+    if not config.DECISION_GATE or not guest_text:
+        return None
+    context = {"previous": decisions.previous_assistant_message(earlier)}
+    return _gate_pool.submit(decisions.decider(model).ask_sync, decisions.WANTS_HUMAN, guest_text, context)
+
+
+def needs_handover_step(future, tool_calls: list, decisions_log: list | None) -> bool:
+    """The guest asked for a person and the agent did not pass a callback on in this turn."""
+    decision = future.result()
+    called_back = any(c["name"] == "request_callback" for c in tool_calls)
+    nudge = decisions.wants_human(decision) and not called_back
+    if decisions_log is not None:
+        decisions_log.append({**decision.record.model_dump(mode="json"), "tool": "request_callback",
+                              "policy_action": "handover_step" if nudge else "none"})
+    return nudge
 
 
 def trim_history(history: list, max_turns: int = config.MAX_HISTORY_TURNS) -> list:

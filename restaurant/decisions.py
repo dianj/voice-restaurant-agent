@@ -13,6 +13,12 @@ each answered with one letter and read as probabilities:
 - p(agree) < 0.70, or no usable answer -> not booked; the agent must not book unless the guest asks again.
 
 The gate can only stop a booking, never make one the code would refuse.
+
+The "wants a person" gate runs on every turn, in parallel with the agent, and is inverted: asking the guest for a
+callback is cheap, so p(yes) >= 0.5 is enough. The code cannot hand over by itself (a callback needs the guest's
+name and contact, which only the guest can give), so when the agent did not call request_callback in that turn, it
+gets one more model call with an instruction to start the HUMAN HANDOVER steps now. It can only add that step, never
+prevent a handover, so steering it ("answer Y") at most leads to an offer of a callback.
 """
 from pathlib import Path
 
@@ -45,7 +51,26 @@ INSTRUCTION = YesNo(
 )
 FLAG_AT = 0.5
 
-QUESTIONS = {CONFIRM_BOOKING.id: CONFIRM_BOOKING, INSTRUCTION.id: INSTRUCTION}
+WANTS_HUMAN = YesNo(
+    "restaurant.wants_human",
+    "Below is a guest's latest message to a restaurant booking assistant, after the assistant's previous message. "
+    "Does the guest ask to talk to a human (the restaurant staff, a person, someone who can call them back) instead of "
+    "the automated assistant?",
+    Severity.MEDIUM,
+    yes="Yes: they ask for a person, the staff, a manager or a call back, or say yes to the assistant's offer of a "
+        "callback from the staff (e.g. 'can I speak to someone?', 'искам да говоря с човек', 'yes' after 'shall the "
+        "staff call you back?').",
+    no="No: anything else: a booking, a menu or allergen question, a complaint that does not ask for a person, "
+       "asking to stay with the assistant, or asking whether it is a bot.",
+    context_template="The assistant's previous message: {previous}",
+    thresholds={"yes": (0.5, 0.5)},
+)
+HANDOVER_AT = 0.5
+HANDOVER_HINT = ("\n\nNOW: the guest's latest message asks for a person. Follow HUMAN HANDOVER in this reply: say the "
+                 "restaurant staff can call them back, and ask for what is still missing (name, phone or email, what "
+                 "it is about). Do not continue with anything else first.")
+
+QUESTIONS = {CONFIRM_BOOKING.id: CONFIRM_BOOKING, INSTRUCTION.id: INSTRUCTION, WANTS_HUMAN.id: WANTS_HUMAN}
 
 
 def decider(model: str | None = None) -> Decider:
@@ -63,3 +88,18 @@ def booking_action(agree, instruction=None) -> Action:
             not instruction.probs or instruction.probs["yes"] >= FLAG_AT):
         return Action.CONFIRM
     return action
+
+
+def wants_human(decision) -> bool:
+    """p(the guest asks for a person) >= 0.5. No usable answer -> False: the prompt's own handover rule still applies.
+    (At 0.5 temperature scaling cannot move the decision; calibration only makes the recorded probability honest.)"""
+    return bool(decision.probs) and decision.probs["yes"] >= HANDOVER_AT
+
+
+def previous_assistant_message(history: list, limit: int = 400) -> str:
+    """The assistant's last reply before the guest's message, shortened, as context for the question."""
+    for message in reversed(history):
+        if message.get("role") == "assistant" and message.get("content"):
+            text = " ".join(str(message["content"]).split())
+            return text if len(text) <= limit else text[:limit] + "..."
+    return "(none: this is the guest's first message)"
