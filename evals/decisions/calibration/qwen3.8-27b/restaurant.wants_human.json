@@ -1,0 +1,20 @@
+{
+  "question_id": "restaurant.wants_human",
+  "model": "qwen3.8-27b",
+  "prompt_hash": "a01cbde79d06",
+  "temperature": 1.0,
+  "n_cases": 32,
+  "fitted_at": "2026-11-24T13:07:22.685499+00:00",
+  "metrics_before": {
+    "n": 32,
+    "accuracy": 0.9688,
+    "ece": 0.0567,
+    "brier": 0.0357
+  },
+  "metrics_after": {
+    "n": 32,
+    "accuracy": 0.9688,
+    "ece": 0.0567,
+    "brier": 0.0357
+  }
+}

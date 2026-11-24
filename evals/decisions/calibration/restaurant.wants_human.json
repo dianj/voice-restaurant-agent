@@ -1,0 +1,20 @@
+{
+  "question_id": "restaurant.wants_human",
+  "model": "gemma-4-26b-a4b-it",
+  "prompt_hash": "a01cbde79d06",
+  "temperature": 1.0,
+  "n_cases": 32,
+  "fitted_at": "2026-11-24T13:05:43.681487+00:00",
+  "metrics_before": {
+    "n": 32,
+    "accuracy": 1.0,
+    "ece": 0.0025,
+    "brier": 0.0004
+  },
+  "metrics_after": {
+    "n": 32,
+    "accuracy": 1.0,
+    "ece": 0.0025,
+    "brier": 0.0004
+  }
+}

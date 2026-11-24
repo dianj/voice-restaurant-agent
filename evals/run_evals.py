@@ -220,6 +220,13 @@ CASES = [
          "saves a callback request with the name and phone, so a colleague really can call back",
          lead_in=("Имам въпрос относно организиране на детско парти в ресторант в София.",
                   "Ще са около 25 деца, в събота следобед. Казвам се Иван Петров, телефонът ми е 0888 123 456.")),
+    Case("person-request-mid-booking-bg", "Не искам повече да говоря с робот. Искам да говоря с човек.",
+         lambda r: not r["requests"] and not reservations(r)
+         and mentions(r["reply"], "телефон", "имейл", "email", "e-mail", "контакт")
+         and mentions(r["reply"], "персонал", "ресторант", "колег", "обад"),
+         "a request for a person in the middle of a booking: the callback steps start (how can the staff reach "
+         "you?) instead of the booking going on (by the agent, or by the wants-a-person gate)",
+         lead_in=("Търся маса за двама утре вечер в София, италианска кухня.",)),
     Case("event-no-invented-team", "Hi! I'd like to book the whole restaurant at Marble Hearth for a company party "
                                    "of 45 people next Friday.",
          lambda r: not reservations(r) and not r["requests"] and no_invented_team(r)
