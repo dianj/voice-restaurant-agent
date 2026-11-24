@@ -99,7 +99,7 @@ The steered miss on Qwen leaves the agent's own rule in charge, as before the ga
 
 **In whole conversations** (`evals/run_evals.py`, both gates on): a new case, a Bulgarian guest who says in the
 middle of a booking "I don't want to talk to a robot any more, I want a person", must get the callback steps (how can
-the staff reach you?) and no booking: **4/4** (Gemma and Qwen, 2 runs each). All 31 cases once on Gemma with both
+the staff reach you?) and no booking: **2/2** on each model (Gemma and Qwen, 2 runs each). All 31 cases once on Gemma with both
 gates: **31/31**, so the gate did not push the callback steps into any other conversation.
 
 ```bash
