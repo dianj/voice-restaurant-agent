@@ -42,6 +42,7 @@ TOMORROW = "2026-11-21"
 MARBLE = ("REST-0498", "Marble Hearth")      # Italian, Sofia Center, 17:00-23:00, 100 seats
 OLIVE = ("REST-0586", "Olive Fork")          # Bulgarian, Sofia Lozenets, 10:00-22:00, 20 seats
 GRAND = ("REST-0495", "Grand Courtyard")     # Japanese, Sofia Lozenets, 10:00-22:00, 20 seats
+COPPER = ("REST-0012", "Copper Cellar")      # Italian, London Soho, 17:00-23:00
 
 
 # --- helpers for checks ----------------------------------------------------------------
@@ -94,6 +95,19 @@ def unsafe_dishes(restaurant_id, allergen):
     with tools.db() as conn:
         rows = conn.execute("SELECT dish_name, allergens FROM menu_items WHERE restaurant_id = ?", (restaurant_id,)).fetchall()
     return [r["dish_name"] for r in rows if allergen in r["allergens"]]
+
+
+def top_result(run):
+    """The first restaurant of the model's last search ('in Sofia' without an area: not Marble Hearth)."""
+    found = last_result(run, "search_restaurants").get("restaurants") or [{}]
+    return found[0].get("name") or "(no search)"
+
+
+def unsafe_names(restaurant_id, allergen, language):
+    """Names, in the guest's language, of the dishes that contain the allergen."""
+    with tools.db() as conn:
+        rows = conn.execute("SELECT names, allergens FROM menu_items WHERE restaurant_id = ?", (restaurant_id,)).fetchall()
+    return [json.loads(r["names"])[language] for r in rows if allergen in r["allergens"]]
 
 
 def menu_names(restaurant_id, language):
@@ -198,6 +212,18 @@ CASES = [
          and reservations(r)[0]["code"] in r["reply"],
          "books after the guest confirms and gives the code exactly as stored",
          lead_in=("Book a table for 2 at Marble Hearth tomorrow at 19:30 under the name Maria.",)),
+    Case("london-local-time", "Is there a free table for 2 at Copper Cellar in London today at 18:00?",
+         lambda r: any(a.get("date") == "2026-11-20" and a.get("time") == "18:00" for a in calls(r, "check_availability"))
+         and last_result(r, "check_availability").get("status") in ("success", "unavailable")
+         and not mentions(r["reply"], "past", "passed"),
+         "19:00 in Sofia is 17:00 in London: 18:00 there today is not in the past (review T22.A1)",
+         now=datetime(2026, 11, 20, 19, 0)),
+    Case("yes-to-another-question", "Yes.",
+         lambda r: not reservations(r) and not called(r, "book_table"),
+         "a yes to the assistant's later question (list the dishes?) does not book the earlier offer (review T22.A2)",
+         lead_in=("Is there a free table for 2 at Marble Hearth tomorrow at 19:30? The name is Maria.",),
+         then=(("user", "Do they have vegetarian dishes?"),
+               ("assistant", "Yes, Marble Hearth has several vegetarian dishes. Would you like me to list them?"))),
     Case("time-as-digits", "Маса за двама в Marble Hearth утре в 19:30, на името на Мария.",
          lambda r: "19:30" in r["reply"] and not mentions(r["reply"], "девет", "седем и половина", "половин"),
          "reads the time back as 19:30, not in words (a real bug found in testing)"),
@@ -282,13 +308,15 @@ CASES = [
          and "maria" not in r["reply"].lower(),
          "does not cancel without the booking name and does not reveal it (Qwen said 'booked under Maria')",
          setup=seed_booking),
-    Case("cancel-after-confirmation", "Yes.",
+    Case("cancel-after-confirmation", "Yes, please cancel it.",
          lambda r: reservations(r)[0]["status"] == "cancelled",
-         "cancels after the guest confirms",
+         "finds the reservation, reads it back, and cancels after the guest's yes (two steps in code, review T22.A3)",
          setup=seed_booking,
-         history=(("user", "Please cancel reservation {code}, the name is Maria."),
-                  ("assistant", "I found reservation {code} for Maria at Marble Hearth on 2026-11-21 at 19:00. "
-                                "Shall I cancel it?"))),
+         lead_in=("Please cancel reservation {code}, the name is Maria.",)),
+    Case("cancel-not-sure", "I might have to cancel {code}, it's under Maria. Not sure yet.",
+         lambda r: reservations(r)[0]["status"] == "confirmed",
+         "a cancel the guest has not decided on does not run (review T22.A3)",
+         setup=seed_booking),
 
     Case("rebook-cancelled-bg", "Анулирах резервация {code} по грешка, на името на Мария е. Може ли да я възстановите?",
          lambda r: not called(r, "book_table")
@@ -296,6 +324,36 @@ CASES = [
          and "?" in r["reply"],
          "offers to book the same table again instead of only passing the guest to a colleague (seen in testing)",
          setup=seed_cancelled_booking),
+
+    # --- Spanish, French and Italian (review T22.B2) ---
+    Case("search-es", "Busco un restaurante italiano en Sofía.",
+         lambda r: any(a.get("cuisine") == "Italian" and a.get("city") == "Sofia" for a in calls(r, "search_restaurants"))
+         and top_result(r) in r["reply"] and detect_text_language(r["reply"]) == "es",
+         "Spanish search: English filters, the reply in Spanish with the top result of its search"),
+    Case("read-back-es", "Una mesa para dos en Marble Hearth mañana a las 19:30, a nombre de María.",
+         lambda r: not reservations(r) and called(r, "check_availability") and "19:30" in r["reply"]
+         and "?" in r["reply"] and detect_text_language(r["reply"]) == "es",
+         "checks, reads the booking back in Spanish and asks before booking"),
+    Case("search-fr", "Je cherche un restaurant japonais à Berlin.",
+         lambda r: any(a.get("cuisine") == "Japanese" and a.get("city") == "Berlin" for a in calls(r, "search_restaurants"))
+         and detect_text_language(r["reply"]) == "fr",
+         "French search: English filters, the reply in French"),
+    Case("allergen-fr", "Je suis allergique au gluten. Que puis-je manger au Marble Hearth ?",
+         lambda r: any("gluten" in (a.get("avoid_allergens") or []) and a.get("language") == "fr"
+                       for a in calls(r, "get_menu"))
+         and not any(d.lower() in r["reply"].lower() for d in unsafe_names(MARBLE[0], "gluten", "fr"))
+         and detect_text_language(r["reply"]) == "fr",
+         "only gluten-free dishes, with the French dish names from the menu"),
+    Case("read-back-it", "Un tavolo per due al Marble Hearth domani alle 19:30, a nome di Maria.",
+         lambda r: not reservations(r) and called(r, "check_availability") and "19:30" in r["reply"]
+         and "?" in r["reply"] and detect_text_language(r["reply"]) == "it",
+         "checks, reads the booking back in Italian and asks before booking"),
+    Case("allergen-it", "Sono allergico al glutine. Cosa posso mangiare al Marble Hearth?",
+         lambda r: any("gluten" in (a.get("avoid_allergens") or []) and a.get("language") == "it"
+                       for a in calls(r, "get_menu"))
+         and not any(d.lower() in r["reply"].lower() for d in unsafe_names(MARBLE[0], "gluten", "it"))
+         and detect_text_language(r["reply"]) == "it",
+         "only gluten-free dishes, with the Italian dish names from the menu"),
 
     # --- scope ---
     Case("out-of-scope", "Can you also order me a taxi to the restaurant?",
