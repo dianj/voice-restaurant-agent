@@ -188,6 +188,12 @@ const EXAMPLES = [
 ];
 
 // --- Rendering (DOM nodes and textContent only: model output is never parsed as HTML) ---
+// Stored timestamps are UTC with an offset; staff read them in their own local time (YYYY-MM-DD HH:MM).
+function localTime(stamp) {
+    const when = new Date(stamp);
+    return isNaN(when) ? String(stamp) : when.toLocaleString('sv-SE', {dateStyle: 'short', timeStyle: 'short'});
+}
+
 function el(tag, cls, text) {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -377,7 +383,7 @@ async function loadReservations() {
         status.append(el('span', 'badge ' + r.status, r.status));
         if (r.history.length) {
             const changed = el('span', 'badge changed', 'changed');
-            changed.title = r.history.map((h) => `${h.at.replace('T', ' ').slice(0, 16)}  ${h.change}`).join('\n');
+            changed.title = r.history.map((h) => `${localTime(h.at)}  ${h.change}`).join('\n');
             status.append(changed);
             for (const h of r.history) status.append(el('small', '', h.change.replace(' -> ', ' → ')));
         }
@@ -405,7 +411,7 @@ function renderRequests(requests) {
             .filter(Boolean).join(' · ');
         what.append(el('small', '', facts));
         row.append(el('td', 'code', String(q.id)), el('td', '', q.customer_name), el('td', '', q.contact), what,
-                   el('td', '', q.created_at.replace('T', ' ').slice(0, 16)));
+                   el('td', '', localTime(q.created_at)));
         body.append(row);
     }
     knownRequests = new Set(requests.map((q) => q.id));

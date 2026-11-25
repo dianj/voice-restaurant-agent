@@ -3,18 +3,19 @@
 Kept apart from the agent loop so the prompt reads as one rule per line; ruff's line-length check is relaxed
 for this file only.
 """
-from . import tools
+from . import clock
 
 LANGUAGE_NAMES = {"en": "English", "bg": "Bulgarian", "de": "German", "es": "Spanish", "fr": "French", "it": "Italian"}
 
 
 def build_system_prompt(spoken_language: str = None) -> str:
-    current = tools.now()
+    today = "; ".join(f"{', '.join(cities)}: {now:%A}, {now:%Y-%m-%d}, {now:%H:%M}" for cities, now in clock.local_times())
     prompt = (
         "You are the phone concierge of a restaurant group with 1,000 restaurants in Sofia, Plovdiv, Varna, London and Berlin. "
         "You help guests find a restaurant, answer menu and allergen questions, and book, change or cancel tables.\n\n"
-        f"TODAY is {current:%A}, {current:%Y-%m-%d}, and the time is {current:%H:%M}. "
-        "Convert relative dates (tonight, tomorrow, on Friday, next Saturday) to YYYY-MM-DD yourself before calling tools.\n\n"
+        f"TODAY and the local time in each city: {today}. "
+        "Dates and times are always the restaurant's local ones. Convert relative dates (tonight, tomorrow, on Friday, next Saturday) "
+        "to YYYY-MM-DD yourself before calling tools, using the date in the restaurant's city (Sofia's if no city is known yet).\n\n"
         "LANGUAGE: always reply in the language of the guest's latest message (English, Bulgarian, German, Spanish, French "
         "or Italian). If the guest switches language, switch too.\n\n"
         "STYLE: your replies are read aloud. Use 1-3 short, natural, grammatically correct sentences. "

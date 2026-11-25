@@ -26,9 +26,9 @@ os.environ["LLM_BASE_URL"] = _FAKE.base_url
 os.environ["DECISION_GATE"] = "0"  # the booking gate has its own tests (tests/test_booking_gate.py)
 
 import server  # noqa: E402  (must come after the environment is prepared)
-from restaurant import config, data, lmstudio, tools  # noqa: E402
+from restaurant import clock, config, data, lmstudio  # noqa: E402
 
-# Friday 20 November 2026, 10:00. Every test sees this as "now".
+# Friday 20 November 2026, 10:00 in Sofia (08:00 UTC). Every test sees this as "now".
 NOW = datetime(2026, 11, 20, 10, 0)
 
 # One fresh database is built once and copied for each test (building it takes longer than copying).
@@ -51,7 +51,7 @@ def clean_state(fake_lm, monkeypatch):
     lmstudio.model_state.update(active=config.MODEL_NAME, switching=False, target=None, error=None)
     shutil.copyfile(_TEMPLATE_DB, os.environ["RESTAURANT_DB_PATH"])
     server.sessions.clear()
-    monkeypatch.setattr(tools, "now", lambda: NOW)
+    monkeypatch.setattr(clock, "utc_now", lambda: clock.sofia_to_utc(NOW))
     yield
 
 

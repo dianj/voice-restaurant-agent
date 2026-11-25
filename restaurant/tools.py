@@ -12,7 +12,7 @@ from datetime import date as date_cls
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 
-from . import config
+from . import clock, config
 from .data import ALLERGEN_NAMES, ALLERGENS, CUISINES, LOCATIONS, NO_ALLERGENS
 
 MENU_LANGUAGES = config.SUPPORTED_LANGUAGES
@@ -26,11 +26,6 @@ ALLERGEN_SYNONYMS = {
 }
 # Letters and digits that cannot be confused when read aloud or typed (no O/0, I/1).
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-
-
-def now() -> datetime:
-    """Current local time. A function so tests can freeze it."""
-    return datetime.now()
 
 
 def connect():
@@ -138,7 +133,7 @@ def parse_booking_request(restaurant, date_text, time_text, guests):
                             f"bookings are possible from {hhmm(opens)} to {hhmm(last_seating)}.")
 
     when = datetime.combine(day, datetime.min.time()) + timedelta(minutes=start)
-    current = now()
+    current = clock.now_in(restaurant["city"])          # the restaurant's own local time
     if when <= current:
         return None, None, f"That time is in the past (now it is {current:%Y-%m-%d %H:%M})."
     if (day - current.date()).days > config.MAX_DAYS_AHEAD:
@@ -176,7 +171,7 @@ def alternative_times(conn, restaurant, day: str, wanted: int, guests: int, limi
                       exclude_code: str = "") -> list:
     """Closest free start times on the same day."""
     opens, closes = opening_window(restaurant["opening_hours"])
-    current = now()
+    current = clock.now_in(restaurant["city"])
     base = datetime.combine(date_cls.fromisoformat(day), datetime.min.time())
     candidates = range(opens, closes - config.LAST_SEATING_BEFORE_CLOSE + 1, config.SLOT_STEP_MINUTES)
     free = []
@@ -379,7 +374,7 @@ def book_table(restaurant_id: str, customer_name: str, date: str, time: str, gue
                           date=when.date().isoformat(), time=when.strftime("%H:%M"), guests=guests,
                           alternatives=alternatives)
         code = new_code(conn)
-        stamp = now().isoformat(timespec="seconds")
+        stamp = clock.stamp()
         conn.execute(
             "INSERT INTO reservations (code, restaurant_id, customer_name, phone, date, time, guests, notes, status, "
             "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?)",
@@ -462,7 +457,7 @@ def cancel_reservation(code: str, customer_name: str):
         if row["status"] == "cancelled":
             return result("success", reservation_code=code, already_cancelled=True)
         conn.execute("UPDATE reservations SET status = 'cancelled', updated_at = ? WHERE code = ?",
-                     (now().isoformat(timespec="seconds"), code))
+                     (clock.stamp(), code))
     return result("success", reservation_code=code, cancelled=True)
 
 
@@ -528,7 +523,7 @@ def update_reservation(code: str, customer_name: str, add_note: str = None, date
                 conn.execute("ROLLBACK")
                 return error("The reservation notes are full (300 characters).")
         final = {"date": row["date"], "time": row["time"], "guests": row["guests"], **changed}
-        stamp = now().isoformat(timespec="seconds")
+        stamp = clock.stamp()
         history = json.loads(row["history"] or "[]")
         history += [{"at": stamp, "change": f"{field}: {row[field]} -> {value}"}
                     for field, value in sorted(changed.items())]
@@ -595,7 +590,10 @@ def request_callback(kind: str, customer_name: str, contact: str, details: str, 
             day = date_cls.fromisoformat(str(date).strip())
         except ValueError:
             return error("date must be YYYY-MM-DD.")
-        if day < now().date():
+        known_city = match_choice(city, LOCATIONS) if isinstance(city, str) else None
+        # Local date of the guest's city; without one, any date that is still today in one of the cities.
+        today = clock.now_in(known_city).date() if known_city else clock.earliest_today()
+        if day < today:
             return error("That date is in the past.")
     if guests is not None and (isinstance(guests, bool) or not isinstance(guests, int) or not 1 <= guests <= 1000):
         return error("guests must be a whole number from 1 to 1000.")
@@ -606,7 +604,7 @@ def request_callback(kind: str, customer_name: str, contact: str, details: str, 
             "INSERT INTO requests (kind, customer_name, contact, details, date, guests, city, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (kind, customer_name.strip(), str(contact).strip(), details.strip(), day.isoformat() if day else None,
-             guests, city.strip() if city else None, now().isoformat(timespec="seconds")),
+             guests, city.strip() if city else None, clock.stamp()),
         )
     return result("success", request_number=cursor.lastrowid, contact=str(contact).strip(),
                   note="Saved for the restaurant staff. Tell the guest the restaurant staff will contact them; "

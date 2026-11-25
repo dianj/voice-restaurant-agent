@@ -30,7 +30,7 @@ sys.path.insert(0, ROOT)
 _TMP = tempfile.mkdtemp(prefix="restaurant-evals-")
 os.environ["RESTAURANT_DB_PATH"] = os.path.join(_TMP, "eval.db")
 
-from restaurant import agent, config, data, lmstudio, tools  # noqa: E402
+from restaurant import agent, clock, config, data, lmstudio, tools  # noqa: E402
 from restaurant.voice import detect_text_language  # noqa: E402
 
 RESULTS_DIR = os.path.join(ROOT, "evals", "results")
@@ -306,8 +306,8 @@ CASES = [
 
 def run_case(case, model):
     shutil.copyfile(TEMPLATE_DB, config.DB_PATH)
-    clock = case.now or NOW
-    tools.now = lambda: clock
+    instant = clock.sofia_to_utc(case.now or NOW)     # a case's "now" is a naive Sofia time
+    clock.utc_now = lambda: instant
     context = case.setup() if case.setup else {}
     history = [{"role": role, "content": text.format(**context)} for role, text in case.history]
     tool_calls, lead_replies = [], []
