@@ -82,6 +82,9 @@
     /* --- Staff view --- */
     .staff { display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
     .staff header h2 { font-size: 16px; margin: 0; }
+    [hidden] { display: none !important; }
+    .staff-login { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 16px; }
+    .staff-login .sub { flex-basis: 100%; margin: 0; }
     .tablewrap { overflow: auto; flex: 1; padding: 0 20px 20px; }
     .table-title { font-size: 14px; margin: 26px 8px 4px; color: var(--muted); font-weight: 600; }
     table { width: 100%; border-collapse: collapse; font-size: calc(var(--fs) - 3px); }
@@ -158,7 +161,13 @@
                 <div class="sub">What the restaurant sees. Updates after every reply.</div>
             </div>
         </header>
-        <div class="tablewrap">
+        <form id="staffLogin" class="staff-login" hidden>
+            <label for="staffToken">Staff token</label>
+            <input id="staffToken" type="password" autocomplete="off" required>
+            <button type="submit">Show reservations</button>
+            <p class="sub" id="staffHint">The token is printed in the server console at start-up, or set it with STAFF_TOKEN.</p>
+        </form>
+        <div class="tablewrap" id="staffData">
             <table>
                 <thead><tr><th>Code</th><th>Guest</th><th>Restaurant</th><th>When</th><th>Guests</th><th>Status</th></tr></thead>
                 <tbody id="reservations"></tbody>
@@ -359,9 +368,25 @@ async function speak(text, language) {
 }
 
 // --- Staff view ---
+// The staff view needs the staff token (names, phone numbers and allergy notes); it is kept for this tab only.
+function showStaffLogin(message) {
+    $('staffLogin').hidden = false;
+    $('staffData').hidden = true;
+    if (message) $('staffHint').textContent = message;
+}
+
 async function loadReservations() {
-    let data;
-    try { data = await (await fetch('/api/reservations')).json(); } catch { return; }
+    const token = sessionStorage.getItem('staffToken');
+    if (!token) { showStaffLogin(); return; }
+    let response, data;
+    try {
+        response = await fetch('/api/reservations', { headers: { 'X-Staff-Token': token } });
+        if (response.status === 401) { sessionStorage.removeItem('staffToken'); showStaffLogin('That token is not valid.'); return; }
+        if (!response.ok) return;
+        data = await response.json();
+    } catch { return; }
+    $('staffLogin').hidden = true;
+    $('staffData').hidden = false;
     renderRequests(data.requests || []);
     const body = $('reservations');
     body.replaceChildren();
@@ -416,6 +441,13 @@ function renderRequests(requests) {
     }
     knownRequests = new Set(requests.map((q) => q.id));
 }
+
+$('staffLogin').addEventListener('submit', (event) => {
+    event.preventDefault();
+    sessionStorage.setItem('staffToken', $('staffToken').value.trim());
+    $('staffToken').value = '';
+    loadReservations();
+});
 
 // --- Setup ---
 for (const text of EXAMPLES) {

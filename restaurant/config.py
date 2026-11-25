@@ -1,5 +1,6 @@
 """Settings read from the environment, plus fixed business rules. Imported by every other module."""
 import os
+import secrets
 
 # The project root (one level above this package): index.html and the default database live there.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -41,6 +42,7 @@ SLOT_STEP_MINUTES = 30         # bookings start on :00 or :30
 # Speech-to-text runs locally with faster-whisper on the CPU (the GPU is reserved for the LLM).
 WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 MAX_AUDIO_BYTES = 15 * 1024 * 1024
+MAX_AUDIO_SECONDS = int(os.environ.get("MAX_AUDIO_SECONDS", "60"))  # longer recordings are refused
 # Languages the agent supports. Whisper's language detection is restricted to these, because short
 # Bulgarian clips are otherwise often labelled as Russian or Macedonian.
 SUPPORTED_LANGUAGES = ("en", "bg", "de", "es", "fr", "it")
@@ -66,3 +68,23 @@ DEFAULT_VOICE_GENDER = "female"
 MAX_TTS_CHARS = 1200
 TTS_ATTEMPTS = 3
 TTS_ATTEMPT_TIMEOUT = 15
+
+
+# --- Access ---
+def load_staff_token() -> str:
+    """STAFF_TOKEN for the staff view (reservations and callback requests). Unset: a random one for this run, printed
+    once in the console, never a fixed public default."""
+    token = os.environ.get("STAFF_TOKEN")
+    if token:
+        return token
+    token = secrets.token_urlsafe(16)
+    banner = "=" * 64
+    print(f"\n{banner}\n  Staff token for this run: {token}\n"
+          f"  Set STAFF_TOKEN to keep the same token between restarts.\n{banner}\n", flush=True)
+    return token
+
+
+STAFF_TOKEN = load_staff_token()
+# Requests per minute and client address (token bucket): chat and speech together; wrong staff tokens.
+CHAT_PER_MINUTE = int(os.environ.get("CHAT_PER_MINUTE", "60"))
+STAFF_PER_MINUTE = int(os.environ.get("STAFF_PER_MINUTE", "10"))

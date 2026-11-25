@@ -6,23 +6,24 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import tempfile
 import threading
 import uuid
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import FastAPI, File, Form, Header, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from openai import APIConnectionError, APITimeoutError
 
-from restaurant import config
+from restaurant import config, ratelimit
 from restaurant.agent import llm_client, run_llm_turn, trim_history
 from restaurant.data import ensure_database
 from restaurant.lmstudio import ensure_default_model_on_startup, list_available_models, model_state, switch_model
 from restaurant.tools import list_requests, list_reservations
-from restaurant.voice import clean_for_speech, detect_text_language, synthesize_speech, transcribe_audio
+from restaurant.voice import AudioTooLong, clean_for_speech, detect_text_language, synthesize_speech, transcribe_audio
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("restaurant")
@@ -68,7 +69,27 @@ TECHNICAL_PROBLEM = {
 }
 
 
+limiters = {"chat": ratelimit.RateLimiter(config.CHAT_PER_MINUTE),
+            "staff": ratelimit.RateLimiter(config.STAFF_PER_MINUTE)}
+
+
+def client_address(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def too_many(limiter: ratelimit.RateLimiter) -> JSONResponse:
+    return JSONResponse({"error": "Too many requests. Please wait a moment."}, status_code=429,
+                        headers={"Retry-After": str(limiter.retry_after())})
+
+
+def rate_limited(request: Request) -> JSONResponse | None:
+    """429 when this address has used up its chat and speech requests for now; None otherwise."""
+    limiter = limiters["chat"]
+    return None if limiter.allow(client_address(request)) else too_many(limiter)
+
+
 def get_session(request: Request):
+    """This browser's session; a new one only for a real turn (a chat message), which is rate limited."""
     session_id = request.cookies.get(SESSION_COOKIE)
     if session_id in sessions:
         sessions.move_to_end(session_id)
@@ -103,6 +124,8 @@ async def serve_ui():
 @app.post("/api/chat")
 async def api_chat(request: Request, message: str = Form(""), audio: UploadFile = File(None),
                    language: str = Form("auto")):
+    if refused := rate_limited(request):
+        return refused
     session_id, session = get_session(request)
     spoken_language = None
     text = message.strip()
@@ -118,6 +141,10 @@ async def api_chat(request: Request, message: str = Form(""), audio: UploadFile 
             tmp.close()
             # The guest can fix the speech language in the UI; "auto" lets Whisper detect it.
             text, spoken_language = await run_in_threadpool(transcribe_audio, tmp.name, language)
+        except AudioTooLong as exc:
+            log.info("Voice message refused: %s", exc)
+            return with_cookie({"error": f"The recording is too long. Please keep it under {config.MAX_AUDIO_SECONDS} "
+                                         "seconds, or type your message."}, session_id, 413)
         except Exception:
             log.exception("Speech recognition failed")
             return with_cookie({"error": "Speech recognition failed. Please try again or type your message."},
@@ -175,7 +202,11 @@ async def api_chat(request: Request, message: str = Form(""), audio: UploadFile 
 
 
 @app.post("/api/tts")
-async def api_tts(text: str = Form(...), language: str = Form(None), gender: str = Form(config.DEFAULT_VOICE_GENDER)):
+async def api_tts(request: Request, text: str = Form(...), language: str = Form(None),
+                  gender: str = Form(config.DEFAULT_VOICE_GENDER)):
+    # edge-tts is free, so the text stays open; the limit keeps one address from flooding it.
+    if refused := rate_limited(request):
+        return refused
     spoken = clean_for_speech(text)
     if not spoken:
         return JSONResponse({"error": "Nothing to speak."}, status_code=400)
@@ -190,13 +221,29 @@ async def api_tts(text: str = Form(...), language: str = Form(None), gender: str
 
 @app.post("/api/reset")
 async def api_reset(request: Request):
-    session_id, session = get_session(request)
-    session["history"] = []
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if session_id not in sessions:          # nothing to reset; the first message makes the session
+        return Response(status_code=204)
+    sessions[session_id]["history"] = []
     return with_cookie({"status": "ok"}, session_id)
 
 
+def staff_refusal(request: Request, token: str | None) -> JSONResponse | None:
+    """None for the right staff token. Wrong tokens are counted per address, so it cannot be guessed quickly."""
+    limiter, address = limiters["staff"], client_address(request)
+    if limiter.blocked(address):
+        return too_many(limiter)
+    if token and secrets.compare_digest(token.encode(), config.STAFF_TOKEN.encode()):
+        return None
+    limiter.allow(address)
+    return JSONResponse({"error": "Staff token required."}, status_code=401)
+
+
 @app.get("/api/reservations")
-def api_reservations():
+def api_reservations(request: Request, x_staff_token: str | None = Header(None)):
+    """The staff view: names, phone numbers, allergy notes and callback contacts, so only with the staff token."""
+    if refused := staff_refusal(request, x_staff_token):
+        return refused
     return {"reservations": list_reservations(), "requests": list_requests()}
 
 
@@ -208,7 +255,7 @@ def api_health():
         llm = {"reachable": True, "model_available": active in models}
     except Exception:
         llm = {"reachable": False, "model_available": False}
-    return {"llm": llm, "model": active, "switching": model_state["switching"], "llm_base_url": config.LLM_BASE_URL}
+    return {"llm": llm, "model": active, "switching": model_state["switching"]}
 
 
 @app.get("/api/models")

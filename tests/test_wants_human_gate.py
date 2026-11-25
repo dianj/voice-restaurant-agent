@@ -16,7 +16,7 @@ CALLBACK = {"kind": "other", "customer_name": "Ivan Petrov", "contact": "0888 12
 
 @pytest.fixture()
 def client(app_url):
-    with httpx.Client(base_url=app_url, timeout=30) as c:
+    with httpx.Client(base_url=app_url, timeout=30, headers={"X-Staff-Token": config.STAFF_TOKEN}) as c:
         yield c
 
 

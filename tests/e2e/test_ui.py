@@ -7,12 +7,14 @@ import json
 import pytest
 from playwright.sync_api import Page, expect
 
-from restaurant import tools
+from restaurant import config, tools
 
 pytestmark = pytest.mark.e2e
 
 
-def open_app(page: Page, app_url: str):
+def open_app(page: Page, app_url: str, staff: bool = True):
+    if staff:   # signed in to the staff view, as the presenter is
+        page.add_init_script(f"sessionStorage.setItem('staffToken', {json.dumps(config.STAFF_TOKEN)})")
     page.goto(app_url)
     expect(page.locator(".msg.bot")).to_have_count(1)  # greeting
 
@@ -231,3 +233,18 @@ def test_speech_language_choice_is_remembered(page: Page, app_url):
     select.select_option("bg")
     page.reload()
     expect(page.locator("#speechLanguage")).to_have_value("bg")
+
+
+def test_the_staff_view_asks_for_the_staff_token(page: Page, app_url):
+    """Review T22.A6: reservations, phone numbers and allergy notes only after the staff token."""
+    tools.request_callback("event", "Ivan Petrov", "0888 123 456", "Children's party for 25", guests=25)
+    open_app(page, app_url, staff=False)
+    expect(page.locator("#staffLogin")).to_be_visible()
+    expect(page.locator("#staffData")).to_be_hidden()
+    page.locator("#staffToken").fill("a wrong guess")
+    page.locator("#staffLogin button").click()
+    expect(page.locator("#staffHint")).to_have_text("That token is not valid.")
+    page.locator("#staffToken").fill(config.STAFF_TOKEN)
+    page.locator("#staffLogin button").click()
+    expect(page.locator("#requests")).to_contain_text("0888 123 456")
+    expect(page.locator("#staffLogin")).to_be_hidden()

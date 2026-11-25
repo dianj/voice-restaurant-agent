@@ -23,6 +23,7 @@ _TMP_DIR = tempfile.mkdtemp(prefix="restaurant-tests-")
 _FAKE = FakeLMStudio().start()
 os.environ["RESTAURANT_DB_PATH"] = os.path.join(_TMP_DIR, "test_restaurant.db")
 os.environ["LLM_BASE_URL"] = _FAKE.base_url
+os.environ["STAFF_TOKEN"] = "test-staff-token"   # fixed for the tests only
 os.environ["DECISION_GATE"] = "0"  # the booking gate has its own tests (tests/test_booking_gate.py)
 
 import server  # noqa: E402  (must come after the environment is prepared)
@@ -51,6 +52,8 @@ def clean_state(fake_lm, monkeypatch):
     lmstudio.model_state.update(active=config.MODEL_NAME, switching=False, target=None, error=None)
     shutil.copyfile(_TEMPLATE_DB, os.environ["RESTAURANT_DB_PATH"])
     server.sessions.clear()
+    for limiter in server.limiters.values():   # each test starts with full request buckets
+        limiter.reset()
     monkeypatch.setattr(clock, "utc_now", lambda: clock.sofia_to_utc(NOW))
     yield
 

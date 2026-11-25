@@ -123,7 +123,7 @@ def test_booking_is_saved_and_can_be_found_and_cancelled_by_its_owner():
     assert "Alex" not in json.dumps(found) and "customer_name" not in found["reservation"]
     # so a cancelled booking can be checked and booked again; the code alone does not reveal who booked
     assert found["reservation"]["restaurant_id"] == rid
-    assert found["reservation"]["notes"] == "gluten allergy"
+    assert found["reservation"]["has_notes"] is True and "notes" not in found["reservation"]   # review T22.A6
 
     assert call(tools.cancel_reservation, code, "Someone Else")["status"] == "error"
     assert call(tools.cancel_reservation, code, "alex ivanov")["cancelled"] is True

@@ -390,7 +390,8 @@ def book_table(restaurant_id: str, customer_name: str, date: str, time: str, gue
 
 def find_reservation(code: str):
     """The guest's name is deliberately left out: anyone who knows (or guesses) a code would otherwise learn whose
-    booking it is, and could then pass the name check for cancelling it. The guest has to say the name."""
+    booking it is, and could then pass the name check for cancelling it. The guest has to say the name.
+    The notes are left out too (allergies are health data); the staff view shows them."""
     with db() as conn:
         row = conn.execute(
             "SELECT r.code, r.date, r.time, r.guests, r.status, r.notes, s.name AS restaurant, r.restaurant_id "
@@ -398,7 +399,9 @@ def find_reservation(code: str):
         ).fetchone()
     if not row:
         return error(NOT_FOUND.format(code=code))
-    return result("success", reservation=dict(row),
+    reservation = {key: row[key] for key in row.keys() if key != "notes"}
+    reservation["has_notes"] = bool(row["notes"])     # notes can hold allergies (health data): staff view only
+    return result("success", reservation=reservation,
                   note="The booking name is not shown. To change or cancel, ask the guest for the name it was "
                        "booked under.")
 
