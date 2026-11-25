@@ -8,9 +8,11 @@ reply), not on exact wording.
 Usage (LM Studio must be running; models are loaded one at a time, Gemma again at the end):
     python evals/run_evals.py --repeat 2                       # all models in ALLOWED_MODELS
     python evals/run_evals.py --models gemma-4-26b-a4b-it --cases book-after-confirmation time-as-digits
+    python evals/run_evals.py --case-file other_cases.py --results-dir other/results --output baseline
 Results: evals/results/latest.md (summary table) and a JSON file with every reply.
 """
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -142,6 +144,7 @@ class Case:
     now: datetime | None = None             # clock for this case (default: NOW)
     lead_in: tuple = ()                        # earlier user turns that really run through the model first,
                                                # so the history holds real tool calls and results
+    then: tuple = ()                           # fixed (role, text) turns after the lead-in, before the prompt
 
 
 CASES = [
@@ -316,6 +319,7 @@ def run_case(case, model):
     except Exception as e:
         return {"case": case.id, "outcome": "error", "reply": "", "tools": [], "reservations": [], "requests": [], "seconds": 0,
                 "error": f"lead-in failed: {e}"}
+    history += [{"role": role, "content": text.format(**context)} for role, text in case.then]
     history.append({"role": "user", "content": case.prompt.format(**context)})
     started = time.time()
     try:
@@ -333,14 +337,27 @@ def run_case(case, model):
     return {"case": case.id, "outcome": outcome, **run}
 
 
+def load_cases(path):
+    """Cases from another file (a set kept outside the repo): it gets this module, to build Case objects and checks."""
+    spec = importlib.util.spec_from_file_location("external_cases", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return list(module.cases(sys.modules[__name__]))
+
+
 def main():
+    # Replies in Bulgarian or German must print on a Windows console or a redirected log (cp1252 by default).
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser()
     parser.add_argument("--models", nargs="*", default=[m for m, _ in config.ALLOWED_MODELS])
     parser.add_argument("--cases", nargs="*", help="run only these case ids")
     parser.add_argument("--repeat", type=int, default=1, help="runs per case (LLM output varies between runs)")
-    parser.add_argument("--output", default="latest", help="name of the summary file in evals/results/")
+    parser.add_argument("--output", default="latest", help="name of the summary file in the results directory")
+    parser.add_argument("--case-file", help="a Python file whose cases(runner) returns the cases to run instead of CASES")
+    parser.add_argument("--results-dir", default=RESULTS_DIR, help="where the JSON and the Markdown summary go")
     args = parser.parse_args()
-    cases = [c for c in CASES if not args.cases or c.id in args.cases]
+    cases = load_cases(args.case_file) if args.case_file else CASES
+    cases = [c for c in cases if not args.cases or c.id in args.cases]
     labels = dict(config.ALLOWED_MODELS)
 
     data.build_database(TEMPLATE_DB)
@@ -365,9 +382,10 @@ def main():
                     print(f"        reply: {r['reply'][:300]!r}  error: {r['error']}", flush=True)
     lmstudio.switch_model(config.MODEL_NAME)  # leave LM Studio with the default model loaded
 
-    os.makedirs(RESULTS_DIR, exist_ok=True)
+    results_dir = args.results_dir
+    os.makedirs(results_dir, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%d")
-    with open(os.path.join(RESULTS_DIR, f"{'results' if args.output == 'latest' else args.output}-{stamp}.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(results_dir, f"{'results' if args.output == 'latest' else args.output}-{stamp}.json"), "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
     lines = [f"# Eval results ({stamp})", "",
@@ -387,7 +405,7 @@ def main():
         cells = ["".join({"pass": "✅", "fail": "❌", "error": "⚠️"}[r["outcome"]]
                          for r in results[model] if r["case"] == case.id) for model in results]
         lines.append(f"| `{case.id}` | {case.note} | " + " | ".join(cells) + " |")
-    with open(os.path.join(RESULTS_DIR, f"{args.output}.md"), "w", encoding="utf-8", newline="\n") as f:
+    with open(os.path.join(results_dir, f"{args.output}.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
     print("\n" + "\n".join(lines))
 
