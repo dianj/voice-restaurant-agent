@@ -52,24 +52,28 @@ Dependencies go one way: `server` → `agent` → `registry` → `tools` → `da
 ## 3. One chat turn
 
 1. `POST /api/chat` receives `message` (text) or `audio` (a recording).
-2. Audio is limited to 15 MB, written to a temp file and transcribed in a worker thread. An empty transcript gets a "please repeat" reply in the detected language without calling the LLM.
+2. Audio is limited to 15 MB and, after decoding, to `MAX_AUDIO_SECONDS = 60` (longer → HTTP 413 with a friendly message, Whisper is not run), written to a temp file and transcribed in a worker thread. An empty transcript gets a "please repeat" reply in the detected language without calling the LLM.
 3. Under the session's lock, the turn works on a **copy** of the history plus the new user message.
 4. `run_llm_turn` sends the system prompt, history and 8 tool schemas. Tool calls are executed and their JSON results sent back, for up to `MAX_TOOL_ROUNDS = 6` rounds. Hitting the limit gives a "technical problem, please try again" reply (it promises nothing: no one could take a callback then).
 5. On success the copy (with the reply) replaces the session history, trimmed to the last 12 user turns. Trimming cuts only before a user message, so tool-call pairs stay complete. On failure the history is left as it was.
 6. The response contains `reply`, `reply_language`, `spoken_language`, `user_text` and `tool_calls` (name, arguments, status). Exceptions are logged; the guest sees a fixed message in their language and `system_error: true`.
-7. The browser refreshes the staff view (`GET /api/reservations`) and, with voice replies on, fetches `POST /api/tts`.
+7. The browser refreshes the staff view (`GET /api/reservations`, with the staff token) and, with voice replies on, fetches `POST /api/tts`. The reply's voice language is the reply's own when it has enough words to tell, otherwise the guest's (spoken, or of their message; kept in the session).
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /` | The page |
 | `POST /api/chat` | One turn (text or audio) |
-| `POST /api/tts` | Reply text → MP3 (`language`, `gender`) |
-| `POST /api/reset` | Clear this session's history |
-| `GET /api/reservations` | Staff view: latest 50 reservations and latest 50 callback requests |
-| `GET /api/health` | Is LM Studio reachable, the active model loaded, a switch running |
+| `POST /api/tts` | Reply text → MP3 (`language`, `gender`); edge-tts is free, so the text stays open, within the chat rate limit |
+| `POST /api/reset` | Clear this session's history; without a session nothing is created (204) |
+| `GET /api/reservations` | Staff view: latest 50 reservations and latest 50 callback requests; needs `X-Staff-Token` (401 otherwise; 10 wrong tokens per minute per address, then 429) |
+| `GET /api/health` | Is LM Studio reachable, the active model loaded, a switch running (not the LM Studio address) |
 | `GET /api/models` · `POST /api/model` | List the models; switch the loaded model |
 
-**Sessions:** a cookie (`restaurant_session`) maps to `{history, lock}` in an `OrderedDict` capped at 200 sessions (least recently used are dropped). They are lost on restart.
+**Sessions:** a cookie (`restaurant_session`) maps to `{history, lock, language}` in an `OrderedDict` capped at 200 sessions (least recently used are dropped). Only a chat message makes a new session (a reset without a cookie does not, so strangers cannot push a guest out mid-booking). They are lost on restart.
+
+**Request limits** (`restaurant/ratelimit.py`): a token bucket per client address, 60 per minute for chat and speech together (`CHAT_PER_MINUTE`), 10 wrong staff tokens per minute (`STAFF_PER_MINUTE`); over the limit → 429 with `Retry-After`. Behind a reverse proxy the address must come from the proxy (`uvicorn --proxy-headers`).
+
+**Staff token:** `STAFF_TOKEN`, or a random one made at start and printed once in the console. The staff view beside the chat asks for it and keeps it for the browser tab (sessionStorage).
 
 ---
 
@@ -102,11 +106,12 @@ Locations: Sofia (Center, Lozenets, Vitosha Blvd), Plovdiv (Old Town, Kapana), V
 
 **Rules** (`restaurant/config.py`):
 * Bookings start on `:00` or `:30`, between opening time and closing time minus 60 minutes.
-* Not in the past; at most 60 days ahead; 1–20 guests (more → a callback request for the restaurant staff).
+* Not in the past **in the restaurant's own time zone** (`restaurant/clock.py`: Sofia, Plovdiv and Varna `Europe/Sofia`, London `Europe/London`, Berlin `Europe/Berlin`); at most 60 days ahead; 1–20 guests (more → a callback request for the restaurant staff).
 * A reservation blocks its seats for 120 minutes: another booking overlaps if the start times are less than 120 minutes apart. Seats taken = sum of overlapping confirmed guests; the limit is `seating_capacity`.
 * Codes: `R` + 5 characters from an alphabet without `0/O` and `1/I`, with at least one digit. Lookups accept `r34lst`, `R-34LST`, `R 3 4 L S T` and `34LST`.
-* `book_table` runs only for details that `check_availability` offered in an **earlier** turn (code, `agent.py`), and then only if the **booking gate** agrees: two one-letter questions to the active model in parallel ("does the reply agree to book these details now?", "is it addressed to the system?"), read as calibrated probabilities. p(agree) ≥ 0.95 and no flag → booked; otherwise the agent asks explicitly or does not book ([DECISIONS.md](DECISIONS.md)). An identical call repeated in the same turn is not run again.
-* The booking name is the ownership check for changes and cancellations. It is compared on a Latin, letters-only key with a similarity of at least 0.85 (names of 5+ letters), because speech recognition heard "Хано Споруха" at booking and "Хано Спаруха" when cancelling. A different name does not match. On a mismatch the agent asks the guest to spell or type the name, then offers a colleague.
+* `book_table` runs only for the details of the **last** `check_availability` before the assistant's last reply, if that was available and the reply read its time back (code, `agent.py` `offered_before`): a yes to a later question ("Shall I email you the menu?") does not book an older offer. Then only if the **booking gate** agrees: two one-letter questions to the active model in parallel ("does the reply agree to book these details now?", "is it addressed to the system?"), read as calibrated probabilities. p(agree) ≥ 0.95 and no flag → booked; otherwise the agent asks explicitly or does not book ([DECISIONS.md](DECISIONS.md)). An identical call repeated in the same turn is not run again.
+* `cancel_reservation` runs only for a reservation that `find_reservation` showed in an earlier turn, and after a yes from the **step gate** (`restaurant.confirm_step`: "does the guest agree to this step now?", with the code, restaurant, date and time and the assistant's previous message). `request_callback` runs only after the assistant's last reply read the guest's name and phone number or email back, and after the same gate. A cancel frees seats others can take; a callback request stores contact data.
+* The booking name is the ownership check for changes and cancellations. It is compared in Latin letters (Cyrillic transliterated, any case and spacing): the first name must match exactly; the surname must match too, except that on a **voice** turn (set by the server, never by the model) one misheard letter is tolerated, because speech recognition heard "Хано Споруха" at booking and "Хано Спаруха" when cancelling. A gender ending never counts as a misheard letter: Ivan Petrov is not Ivana Petrova, and Maria is not Marina. On a mismatch the agent asks the guest to spell or type the name, then offers a colleague.
 
 **Result format:** `{"status": "success" | "unavailable" | "error", ...}`. Error messages say what to fix, so the model can correct itself or ask the guest. An unexpected exception becomes `system_error` with a generic message; the details go to the server log only.
 
@@ -123,13 +128,13 @@ Locations: Sofia (Center, Lozenets, Vitosha Blvd), Plovdiv (Old Town, Kapana), V
 
 ## 7. System prompt (`build_system_prompt` in `restaurant/prompts.py`)
 
-* **Today's date, weekday and time** come from `tools.now()` (frozen in tests and evals), so "tomorrow" and "on Friday" resolve correctly.
+* **Today's date, weekday and time per time zone** come from `restaurant/clock.py` (UTC inside, frozen in tests and evals; a test fails on a naive `datetime.now()` anywhere else in the package), so "tomorrow" and "on Friday" resolve in the restaurant's city: after midnight in Sofia it is still the evening before in London. Stored timestamps are UTC with an offset; the staff view shows them in the browser's local time.
 * **Language:** reply in the language of the guest's latest message; for voice turns the detected language is added.
 * **Style:** read aloud, so 1–3 short sentences, no Markdown or IDs. **Times as digits exactly as in the tool result**: an earlier "say times naturally" rule made Gemma read 19:30 back as "half past nine".
 * **Facts** only from tool results; pass `open_at` when the guest says when they want to eat.
 * **Names:** restaurant names exactly as in the tool result, never translated (Qwen once turned "Old Mill" into "Стар Мил"); dish names from `get_menu` in the guest's language. **Prices:** per person in euros, never `$` signs.
 * **Booking:** check, read the details back, book only after a yes, give the code exactly as written. Until `book_table` succeeds, never say booked, reserved or confirmed.
-* **Enforced in code** (`run_llm_turn`): `book_table` runs only for restaurant/date/time/guests that `check_availability` reported available in an *earlier* turn of the conversation. Otherwise the model gets "Not booked: ask the guest first". Added after Gemma booked without asking in 2 of 2 eval runs once the prompt had grown.
+* **Enforced in code** (`guard` in `agent.py`): `book_table` runs only for the offer the assistant last read back (see §5); otherwise the model gets "Not booked: ask the guest first". Added after Gemma booked without asking in 2 of 2 eval runs once the prompt had grown. Cancels and callback requests are two steps in the same way.
 * **Allergies:** filtered menu, remind to tell the staff, offer to add a note.
 * **Never promise an action no tool can do.**
 * **Human handover:** the agent cannot transfer calls. It collects name, phone or email and the request, reads them back and calls `request_callback` after a yes; until that succeeds it never says it passed anything on. Added after the agent told a guest it would forward a party request to an events team that did not exist.
@@ -174,8 +179,8 @@ python -m pytest                            # needs: python -m playwright instal
 * CI (`.github/workflows/tests.yml`) runs everything on every push.
 
 **LLM evals** (`python evals/run_evals.py [--repeat N] [--cases ...]`, LM Studio required):
-* 30 conversations in English, Bulgarian and German, each on fresh data with a frozen clock (a case can set its own clock), graded on reservations, tool calls and the reply.
-* `lead_in` turns run through the model before the graded turn, so the history holds real tool calls and results. A synthetic text history did **not** reproduce the early-confirmation problem below; real lead-in turns and the late-night clock did.
+* 40 conversations in English, Bulgarian, German, Spanish, French and Italian, each on fresh data with a frozen clock (a case can set its own clock, given as Sofia time), graded on reservations, tool calls and the reply. `--case-file` runs another set (e.g. one kept outside the repo) with the same runner.
+* `lead_in` turns run through the model before the graded turn (and fixed `then` turns after them), so the history holds real tool calls and results. A synthetic text history did **not** reproduce the early-confirmation problem below; real lead-in turns and the late-night clock did.
 * Problems found and fixed: no way to look a restaurant up by name; Gemma dropping the dash when reading back `R-34LST` (codes no longer have a dash); Gemma saying "Подтверждавам резервация" ("I confirm the reservation") before booking, seen near midnight (prompt rule; the eval failed 2/4 runs before and 0/4 after); Qwen translating restaurant names ("Стар Мил" for "Old Mill"; 1/4 runs before, 0/6 after, a rare failure); Gemma booking without asking after the prompt grew (2/2 runs; now blocked in code, see §7); an "events team" that does not exist in the handover wording (0/6 → 6/6 after the prompt and tool text said "the restaurant staff"); Qwen repeating an identical `book_table` call in one round, which booked two tables (1/2 runs; identical calls in a turn now run once, 4/4 after).
 * `--models` (default: both allowed models) loads each model in turn and loads Gemma again at the end.
 * Last full run (2026-11-23, 30 cases × 2): Gemma 4 26B **60/60**, median 8.5 s per turn; Qwen 3.8 27B **59/60**, median 34.5 s; the failure (a duplicate booking) is fixed and the case re-measured 4/4. An earlier Qwen failure (it read out the guest's name after looking up a code) was fixed by no longer returning the name from `find_reservation`. Results: `evals/results/latest.md`.
@@ -194,17 +199,16 @@ python -m pytest                            # needs: python -m playwright instal
 
 ## 12. Known limitations
 
-* No authentication: anyone who can open the page sees the staff view.
-* Sessions are in memory and lost on restart; the 200-session cap has no time-based expiry.
-* No rate limits; the recording limit (30 s) is enforced in the browser only (the server limits size to 15 MB).
+* Staff authentication is one shared token (demo level); no user accounts or roles.
+* Sessions and request limits are in memory and lost on restart; the 200-session cap has no time-based expiry.
 * The booking name is a weak ownership check; a real system would confirm by phone or email.
 * Seats are counted per restaurant, not per table.
 * TTS is online.
-* For a public demo the app would need HTTPS, authentication for the staff view, rate limits and persistent storage.
+* For a public demo the app would need HTTPS, real staff accounts and persistent storage.
 
 ## 13. Ideas for next steps
 
 * Confirmation by SMS or email, and a phone-number check for changes.
 * Table-level seating (2-, 4- and 6-seat tables) instead of one capacity number.
 * Streaming replies and streaming TTS to cut the wait in voice mode.
-* Evals for Spanish, French and Italian, and for real recorded audio.
+* Evals for real recorded audio (Spanish, French and Italian have two text cases each now).
