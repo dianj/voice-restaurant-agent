@@ -28,13 +28,28 @@ from .decide.core import choose_action
 
 CONFIRM_BOOKING = YesNo(
     "restaurant.confirm_booking",
-    "A restaurant booking assistant read the booking below back to the guest and asked whether to book it. Read the "
-    "guest's latest message. Does it clearly agree that this booking should be made now?",
+    "A restaurant booking assistant offered the booking below. Read the assistant's previous message and the guest's "
+    "latest message. Does the guest's message clearly agree that this booking should be made now? A yes to another "
+    "question in the previous message (sending the menu, an allergy, anything else) is not a yes to the booking.",
     Severity.HIGH,
-    yes="Yes: the guest clearly agrees to book it now (e.g. \"yes, book it\", \"perfect\", \"да, запази\").",
+    yes="Yes: the guest clearly agrees to book it now, answering a question about this booking (e.g. \"yes, book "
+        "it\", \"perfect\", \"да, запази\").",
     no="No: the guest declines, wants other details (another time, day, place or number of guests), asks a "
-       "question first, hesitates, or talks about something else.",
-    context_template="Offered booking: {booking}",
+       "question first, hesitates, talks about something else, or says yes to a different question.",
+    context_template="Offered booking: {booking}\nThe assistant's previous message: {previous}",
+)
+
+CONFIRM_STEP = YesNo(
+    "restaurant.confirm_step",
+    "A restaurant booking assistant asked the guest whether to do the step below. Read the assistant's previous "
+    "message and the guest's latest message. Does the guest's message clearly agree that this step should be done "
+    "now?",
+    Severity.HIGH,
+    yes="Yes: the guest clearly agrees to this step now (e.g. \"yes, cancel it\", \"yes, please pass it on\", "
+        "\"да, анулирайте я\").",
+    no="No: the guest declines, is not sure yet, wants something changed first, asks a question first, or says yes "
+       "to a different question.",
+    context_template="Step: {step}\nThe assistant's previous message: {previous}",
 )
 
 INSTRUCTION = YesNo(
@@ -70,7 +85,7 @@ HANDOVER_HINT = ("\n\nNOW: the guest's latest message asks for a person. Follow 
                  "restaurant staff can call them back, and ask for what is still missing (name, phone or email, what "
                  "it is about). Do not continue with anything else first.")
 
-QUESTIONS = {CONFIRM_BOOKING.id: CONFIRM_BOOKING, INSTRUCTION.id: INSTRUCTION, WANTS_HUMAN.id: WANTS_HUMAN}
+QUESTIONS = {q.id: q for q in (CONFIRM_BOOKING, CONFIRM_STEP, INSTRUCTION, WANTS_HUMAN)}
 
 
 def decider(model: str | None = None) -> Decider:
@@ -79,11 +94,11 @@ def decider(model: str | None = None) -> Decider:
                    calibration_dir=Path(config.CALIBRATION_DIR))
 
 
-def booking_action(agree, instruction=None) -> Action:
+def booking_action(agree, instruction=None, question=CONFIRM_BOOKING) -> Action:
     """The action from p(guest agrees), capped at CONFIRM when the reply is flagged (or the flag check failed)."""
     if not agree.probs:
         return Action.ESCALATE
-    action = choose_action(CONFIRM_BOOKING, "yes", agree.probs["yes"], agree.reason == "policy")
+    action = choose_action(question, "yes", agree.probs["yes"], agree.reason == "policy")
     if action == Action.ACT and instruction is not None and (
             not instruction.probs or instruction.probs["yes"] >= FLAG_AT):
         return Action.CONFIRM

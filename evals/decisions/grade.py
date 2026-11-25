@@ -1,7 +1,7 @@
 """Grade the confirmation gate as a whole on the collected runs: what would the policy do with each reply?
 
 A "yes" reply must run the action (ACT); a "no" or "unclear" reply must not. Run after `collect` for both questions:
-    python evals/decisions/grade.py [--suffix .qwen3.8-27b]
+    python evals/decisions/grade.py [--suffix .qwen3.8-27b] [--question restaurant.confirm_step]
 """
 import argparse
 import json
@@ -31,21 +31,24 @@ def decision(question, row, cal_dir: Path, model: str) -> Decision:
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--suffix", default="", help="run file suffix, e.g. .qwen3.8-27b")
+    parser.add_argument("--question", default=decisions.CONFIRM_BOOKING.id,
+                        help="the yes gate: restaurant.confirm_booking or restaurant.confirm_step")
     parser.add_argument("--calibration", type=Path, default=ROOT / "evals" / "decisions" / "calibration")
     args = parser.parse_args(argv)
-    agree_run = json.loads((RUNS / f"restaurant.confirm_booking{args.suffix}.json").read_text(encoding="utf-8"))
+    question = decisions.QUESTIONS[args.question]
+    agree_run = json.loads((RUNS / f"{question.id}{args.suffix}.json").read_text(encoding="utf-8"))
     flag_run = json.loads((RUNS / f"restaurant.instruction_in_reply{args.suffix}.json").read_text(encoding="utf-8"))
     flags = {r["id"]: r for r in flag_run["rows"]}
     model = agree_run["model"]
     counts, wrong = Counter(), []
     for row in agree_run["rows"]:
-        agree = decision(decisions.CONFIRM_BOOKING, row, args.calibration, model)
+        agree = decision(question, row, args.calibration, model)
         flag = decision(decisions.INSTRUCTION, flags[row["id"]], args.calibration, model)
         raw = Decision(agree.question_id, None, None, None, row["probs_raw"] or {}, {}, Action.CONFIRM, "policy",
                        0, None)
-        alone = decisions.booking_action(raw)          # the first question alone, raw probabilities (T = 1)
-        both = decisions.booking_action(agree, flag)
-        group = row["id"].split("-")[0]
+        alone = decisions.booking_action(raw, None, question)   # the first question alone, raw probabilities (T = 1)
+        both = decisions.booking_action(agree, flag, question)
+        group = row["id"].removeprefix("step-").split("-")[0]
         ok = (both == Action.ACT) == (row["expected"] == "yes")
         counts[(group, "ok" if ok else "wrong")] += 1
         counts[("acted_alone_wrongly", group)] += (alone == Action.ACT) and row["expected"] != "yes"

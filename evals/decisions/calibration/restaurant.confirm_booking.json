@@ -1,20 +1,20 @@
 {
   "question_id": "restaurant.confirm_booking",
   "model": "gemma-4-26b-a4b-it",
-  "prompt_hash": "08de156eb30a",
-  "temperature": 4.989,
-  "n_cases": 26,
-  "fitted_at": "2026-11-23T23:48:55.701292+00:00",
+  "prompt_hash": "3c6207610a11",
+  "temperature": 5.127,
+  "n_cases": 32,
+  "fitted_at": "2026-11-25T12:12:02.724623+00:00",
   "metrics_before": {
-    "n": 26,
-    "accuracy": 0.9231,
-    "ece": 0.0767,
-    "brier": 0.1534
+    "n": 32,
+    "accuracy": 0.9375,
+    "ece": 0.062,
+    "brier": 0.1234
   },
   "metrics_after": {
-    "n": 26,
-    "accuracy": 0.9231,
-    "ece": 0.0734,
-    "brier": 0.1085
+    "n": 32,
+    "accuracy": 0.9375,
+    "ece": 0.0296,
+    "brier": 0.0949
   }
 }

@@ -28,7 +28,7 @@ def first_restaurant():
 def offer_then_book(client, fake_lm, rid, name="Alex", time="19:30"):
     """Turn 1: the agent checks and asks. Turn 2: the guest says yes and the agent books."""
     details = {"restaurant_id": rid, "date": "2026-11-21", "time": time, "guests": 2}
-    fake_lm.script(("check_availability", details), reply="A table is available. Shall I book it?")
+    fake_lm.script(("check_availability", details), reply=f"A table at {time} is available. Shall I book it?")
     chat(client, f"A table for 2 tomorrow at {time} under {name}")
     fake_lm.script(("book_table", {**details, "customer_name": name}), reply="Booked.")
     return chat(client, "Yes, please book it")
@@ -46,7 +46,7 @@ def test_an_identical_tool_call_repeated_in_one_turn_runs_once(client, fake_lm):
     # Found by the eval: Qwen sent the same book_table call twice in one round and the guest got two tables.
     rid = first_restaurant()
     details = {"restaurant_id": rid, "date": "2026-11-21", "time": "19:30", "guests": 2}
-    fake_lm.script(("check_availability", details), reply="A table is available. Shall I book it?")
+    fake_lm.script(("check_availability", details), reply="A table at 19:30 is available. Shall I book it?")
     chat(client, "A table for 2 tomorrow at 19:30 under Alex")
     booking = {**details, "customer_name": "Alex"}
     fake_lm.script(("book_table", booking), ("book_table", dict(reversed(booking.items()))), reply="Booked.")
@@ -130,6 +130,8 @@ def test_tool_loop_is_capped(client, fake_lm):
 
 
 def test_callback_request_from_the_agent_shows_up_for_the_staff(client, fake_lm):
+    fake_lm.script(reply="So: Ivan Petrov, 0888 123 456, a children's party for 25 on Saturday. Shall I pass it on?")
+    chat(client, "Ivan Petrov, 0888 123 456, a children's party for 25 kids on Saturday afternoon")
     fake_lm.script(("request_callback", {"kind": "event", "customer_name": "Ivan Petrov", "contact": "0888 123 456",
                                          "details": "Children's party, about 25 kids, Saturday afternoon",
                                          "guests": 25, "city": "Sofia"}),

@@ -59,7 +59,7 @@ def test_model_output_is_rendered_as_text_not_html(page: Page, app_url, fake_lm)
 def test_booking_appears_in_the_staff_view(page: Page, app_url, fake_lm):
     rid, name = restaurant_10_to_22()
     details = {"restaurant_id": rid, "date": "2026-11-21", "time": "19:30", "guests": 2}
-    fake_lm.script(("check_availability", details), reply="Available. Shall I book it?")
+    fake_lm.script(("check_availability", details), reply="Available at 19:30. Shall I book it?")
     open_app(page, app_url)
     expect(page.locator("#reservations")).to_contain_text("No reservations yet")
     send(page, "A table for 2 tomorrow at 19:30, Maria")
@@ -77,9 +77,12 @@ def test_booking_appears_in_the_staff_view(page: Page, app_url, fake_lm):
 def test_cancelled_reservation_is_shown_as_cancelled(page: Page, app_url, fake_lm):
     rid, _ = restaurant_10_to_22()
     code = __import__("json").loads(tools.book_table(rid, "Ivan", "2026-11-21", "12:00", 4))["reservation_code"]
-    fake_lm.script(("cancel_reservation", {"code": code, "customer_name": "Ivan"}), reply="Cancelled.")
+    fake_lm.script(("find_reservation", {"code": code}), reply="Tomorrow at 12:00. Shall I cancel it?")
     open_app(page, app_url)
-    send(page, "Cancel it")
+    send(page, f"Cancel {code}, Ivan")
+    expect(last_bot(page)).to_contain_text("Shall I cancel it?")
+    fake_lm.script(("cancel_reservation", {"code": code, "customer_name": "Ivan"}), reply="Cancelled.")
+    send(page, "Yes, cancel it")
     expect(page.locator("#reservations tr").first).to_have_class("cancelled")
     expect(page.locator("#reservations .badge")).to_have_text("cancelled")
 
