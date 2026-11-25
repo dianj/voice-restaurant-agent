@@ -65,6 +65,38 @@ def test_reply_language_picks_the_tts_voice_for_typed_conversations(text, langua
     assert voice.detect_text_language(text) == language
 
 
+@pytest.mark.parametrize("text, language", [
+    ("Lo siento, no tenemos restaurantes en París.", "es"),
+    ("Merci, à demain !", "fr"),
+    ("Grazie mille, a domani.", "it"),
+    ("¿Algo más?", "es"),
+])
+def test_short_spanish_french_and_italian_replies_get_their_own_voice(text, language):
+    """Review T22.A8: these short replies scored no stop words and were read with the English voice."""
+    assert voice.detect_text_language(text) == language
+
+
+def test_a_reply_with_too_few_words_keeps_the_guests_language():
+    assert voice.detect_text_language("R34LST, 19:30.", fallback="it") == "it"
+    assert voice.detect_text_language("OK!", fallback="fr") == "fr"
+    assert voice.detect_text_language("Ich habe einen Tisch für Sie.", fallback="en") == "de"   # a clear reply wins
+
+
+def test_the_reply_voice_follows_the_guest_when_the_reply_is_short(fake_lm):
+    from fastapi.testclient import TestClient
+
+    import server
+    client = TestClient(server.app)
+
+    def reply_language(message):
+        return client.post("/api/chat", data={"message": message}).json()["reply_language"]
+
+    fake_lm.script(reply="Vale.")
+    assert reply_language("Hola, ¿tienen una mesa para dos esta noche?") == "es"
+    fake_lm.script(reply="R34LST, 19:30.")
+    assert reply_language("Sí, gracias.") == "es"                  # the session remembers the guest's language
+
+
 def test_markdown_and_links_are_not_read_aloud_and_length_is_capped():
     text = "**Marble Hearth** has a table, see [the menu](https://x.io).\n- Code R34LST\nhttps://x.io"
     assert voice.clean_for_speech(text) == "Marble Hearth has a table, see the menu. Code R, 3, 4, L, S, T"

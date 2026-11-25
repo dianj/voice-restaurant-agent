@@ -67,24 +67,42 @@ def transcribe_audio(path: str, language: str = None):
     return text, language
 
 
-# Short, frequent words per language, used to pick the TTS voice for a typed (not spoken) conversation.
+# Short, frequent words per language, used to pick the TTS voice for a typed (not spoken) conversation. The second
+# group of each language: words of short replies ("Merci, à demain !") that had none of the first ones.
 STOPWORDS = {
-    "en": {"the", "and", "you", "for", "your", "table", "is", "at", "have", "would", "a", "to"},
-    "de": {"der", "die", "das", "und", "ist", "ich", "sie", "ein", "eine", "für", "tisch", "uhr", "nicht", "mit"},
-    "es": {"el", "la", "los", "las", "que", "para", "una", "mesa", "con", "por", "es", "su", "y"},
-    "fr": {"le", "la", "les", "et", "est", "une", "pour", "vous", "table", "avec", "des", "pas", "votre"},
-    "it": {"il", "la", "che", "per", "una", "tavolo", "con", "è", "di", "sono", "alle", "gli", "non"},
+    "en": {"the", "and", "you", "for", "your", "table", "is", "at", "have", "would", "a", "to",
+           "thank", "thanks", "sorry", "we", "please", "of", "are", "it"},
+    "de": {"der", "die", "das", "und", "ist", "ich", "sie", "ein", "eine", "für", "tisch", "uhr", "nicht", "mit",
+           "danke", "bis", "morgen", "wir", "haben", "leider", "gerne", "bitte", "gern"},
+    "es": {"el", "la", "los", "las", "que", "para", "una", "mesa", "con", "por", "es", "su", "y",
+           "lo", "siento", "tenemos", "gracias", "hasta", "mañana", "algo", "más", "muy", "sí", "del", "restaurantes"},
+    "fr": {"le", "la", "les", "et", "est", "une", "pour", "vous", "table", "avec", "des", "pas", "votre",
+           "merci", "à", "demain", "nous", "avons", "désolé", "bonne", "soirée", "oui", "très", "du", "au"},
+    "it": {"il", "la", "che", "per", "una", "tavolo", "con", "è", "di", "sono", "alle", "gli", "non",
+           "grazie", "mille", "domani", "abbiamo", "dispiace", "buona", "serata", "sì", "molto", "ci", "mi"},
 }
+# Letters that belong to one language only (among the six).
+LETTER_HINTS = {"es": "ñ¿¡", "fr": "çœ", "de": "ß"}
 
 
-def detect_text_language(text: str) -> str:
+def detect_text_language(text: str, fallback: str | None = None) -> str:
+    """The language of a reply. `fallback` (the guest's language) wins when the reply has too few words to tell:
+    no match, a single matching word, or a tie."""
     cyrillic = len(re.findall(r"[Ѐ-ӿ]", text))
     latin = len(re.findall(r"[A-Za-zÀ-ÿ]", text))
     if cyrillic and cyrillic >= latin * 0.3:
         return "bg"
-    words = re.findall(r"[a-zà-ÿ]+", text.lower())
+    lower = text.lower()
+    words = re.findall(r"[a-zà-ÿß]+", lower)
     scores = {lang: sum(w in stop for w in words) for lang, stop in STOPWORDS.items()}
+    for lang, letters in LETTER_HINTS.items():
+        if any(ch in lower for ch in letters):
+            scores[lang] += 2
+    ranked = sorted(scores.values(), reverse=True)
     best = max(scores, key=scores.get)
+    weak = ranked[0] <= 1 or ranked[0] == ranked[1]
+    if weak and fallback in config.SUPPORTED_LANGUAGES:
+        return fallback
     return best if scores[best] > 0 else config.PRIMARY_LANGUAGE
 
 

@@ -191,7 +191,10 @@ async def api_chat(request: Request, message: str = Form(""), audio: UploadFile 
         finally:
             active_turns -= 1
 
-    reply_language = detect_text_language(reply) if reply else (spoken_language or detect_text_language(text))
+    # The guest's language: spoken, or of their message (the session's earlier one when this one is too short to tell).
+    guest_language = spoken_language or detect_text_language(text, fallback=session.get("language"))
+    session["language"] = guest_language
+    reply_language = detect_text_language(reply, fallback=guest_language) if reply else guest_language
     payload = {"user_text": text, "spoken_language": spoken_language, "reply_language": reply_language,
                "tool_calls": [tool_summary(c) for c in tool_calls], "model": active_model}
     if failed:
