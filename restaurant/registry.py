@@ -25,8 +25,14 @@ AVAILABLE_FUNCTIONS = {
 }
 
 
-def execute_tool_call(fn_name: str, raw_arguments: str) -> str:
-    """Run one model-requested tool call; always return a JSON string, never raise."""
+# Tools that check the booking name: on a voice turn they tolerate one misheard letter in the surname.
+NAME_CHECKED = {"cancel_reservation", "update_reservation"}
+
+
+def execute_tool_call(fn_name: str, raw_arguments: str, spoken: bool = False) -> str:
+    """Run one model-requested tool call; always return a JSON string, never raise.
+
+    `spoken` comes from the server (the turn was a recording), never from the model's arguments."""
     if fn_name not in AVAILABLE_FUNCTIONS:
         return json.dumps({"status": "error",
                            "message": f"Unknown tool '{fn_name}'. Available: {list(AVAILABLE_FUNCTIONS)}"})
@@ -36,6 +42,9 @@ def execute_tool_call(fn_name: str, raw_arguments: str) -> str:
         return json.dumps({"status": "error", "message": f"Tool arguments are not valid JSON: {e}"})
     if not isinstance(fn_args, dict):
         return json.dumps({"status": "error", "message": "Tool arguments must be a JSON object."})
+    fn_args.pop("spoken", None)
+    if fn_name in NAME_CHECKED:
+        fn_args["spoken"] = spoken
     try:
         return AVAILABLE_FUNCTIONS[fn_name](**fn_args)
     except TypeError as e:

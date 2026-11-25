@@ -168,7 +168,7 @@ def run_llm_turn(turn_history: list, tool_calls: list, spoken_language: str = No
                 output = refusal
                 done_this_turn.add(key)
             else:
-                output = execute_tool_call(tc.function.name, tc.function.arguments)
+                output = execute_tool_call(tc.function.name, tc.function.arguments, spoken=spoken_language is not None)
                 done_this_turn.add(key)
             tool_calls.append({"name": tc.function.name, "arguments": tc.function.arguments or "{}", "result": output})
             turn_history.append({"role": "tool", "tool_call_id": tc.id, "content": output})

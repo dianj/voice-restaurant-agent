@@ -132,11 +132,35 @@ def test_booking_is_saved_and_can_be_found_and_cancelled_by_its_owner():
 
 def test_owner_name_tolerates_speech_recognition_variants_but_not_another_name():
     row = {"customer_name": "Хано Споруха"}
-    for heard in ("хано спаруха", "Хано с Паруха", "Hano Sporuha", "  ХАНО СПОРУХА. "):
+    for heard in ("Hano Sporuha", "  ХАНО СПОРУХА. ", "Хано Спо руха"):
         assert tools.is_owner(row, heard), heard
+    for heard in ("хано спаруха", "Хано с Паруха"):                   # one misheard letter: only on a voice turn
+        assert tools.is_owner(row, heard, spoken=True) and not tools.is_owner(row, heard), heard
     for other in ("Мария Петрова", "Хано", "", "Иван Споруха"):
-        assert not tools.is_owner(row, other), other
+        assert not tools.is_owner(row, other, spoken=True), other
     assert tools.is_owner({"customer_name": "Ana"}, "ana") and not tools.is_owner({"customer_name": "Ana"}, "Ina")
+
+
+def test_a_similar_name_of_another_person_is_not_the_owner():
+    """Review T22.A4: the whole-name ratio took 'Ivan Petrov' for 'Ivana Petrova'. The first name must match; the
+    surname may differ by one misheard letter on a voice turn, but never by a gender ending."""
+    for stored, other in (("Ivana Petrova", "Ivan Petrov"), ("Мария Петрова", "Мария Петров"),
+                          ("Maria Ivanova", "Marina Ivanova"), ("Elena Dimova", "Elena Dimov"),
+                          ("Anna Kowalska", "Anna Kowalski"), ("Ivan Petrov", "Ivana Petrov")):
+        assert not tools.is_owner({"customer_name": stored}, other, spoken=True), (stored, other)
+        assert not tools.is_owner({"customer_name": other}, stored, spoken=True), (other, stored)
+    assert not tools.is_owner({"customer_name": "Maria Ivanova"}, "Maria Ivonova", spoken=False)
+    assert tools.is_owner({"customer_name": "Maria Ivanova"}, "Maria Ivonova", spoken=True)
+
+
+def test_the_model_cannot_claim_a_voice_turn(monkeypatch):
+    """Only the server knows whether a turn was spoken: a 'spoken' argument from the model is dropped."""
+    from restaurant import registry
+    rid = restaurant("city = 'Sofia' AND opening_hours = '10:00-22:00'")["restaurant_id"]
+    code = call(tools.book_table, rid, "Hano Sporuha", TOMORROW, "19:00", 2)["reservation_code"]
+    arguments = json.dumps({"code": code, "customer_name": "Hano Sparuha", "spoken": True})
+    assert json.loads(registry.execute_tool_call("cancel_reservation", arguments))["status"] == "error"
+    assert json.loads(registry.execute_tool_call("cancel_reservation", arguments, spoken=True))["cancelled"] is True
 
 
 def test_cancelled_reservation_frees_the_seats():

@@ -10,7 +10,6 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import date as date_cls
 from datetime import datetime, timedelta
-from difflib import SequenceMatcher
 
 from . import clock, config
 from .data import ALLERGEN_NAMES, ALLERGENS, CUISINES, LOCATIONS, NO_ALLERGENS
@@ -417,18 +416,50 @@ _CYRILLIC_TO_LATIN = dict(zip("абвгдежзийклмнопрстуфхцч�
 
 def name_key(name) -> str:
     """Lower case, Latin letters only, no spaces: "Хано Споруха", "hano sporuha" and "Хано С Поруха" compare equal."""
+    return "".join(name_parts(name))
+
+
+def name_parts(name) -> list:
+    """Each word of a name in Latin letters: "Хано Споруха" -> ["hano", "sporuha"]."""
     text = "".join(_CYRILLIC_TO_LATIN.get(ch, ch) for ch in str(name or "").lower())
-    return re.sub(r"[^a-z]", "", text)
+    return [part for part in (re.sub(r"[^a-z]", "", word) for word in text.split()) if part]
 
 
-def same_name(given, stored) -> bool:
-    """Spoken names come back slightly different from turn to turn ("Споруха" at booking, "Спаруха" when
-    cancelling), so one or two misheard letters are tolerated; a different name is not."""
-    given, stored = name_key(given), name_key(stored)
-    if len(given) < 2:
+def one_letter_apart(a: str, b: str) -> bool:
+    """At most one letter added, dropped or changed."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
         return False
-    return given == stored or (min(len(given), len(stored)) >= 5
-                               and SequenceMatcher(None, given, stored).ratio() >= 0.85)
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b, strict=True)) == 1
+    shorter, longer = sorted((a, b), key=len)
+    return any(longer[:i] + longer[i + 1:] == shorter for i in range(len(longer)))
+
+
+def gender_pair(a: str, b: str) -> bool:
+    """Surnames that differ by a gender ending: Petrov/Petrova, Dimov/Dimova, Kowalski/Kowalska."""
+    shorter, longer = sorted((a, b), key=len)
+    if longer == shorter + "a":
+        return True
+    return len(a) == len(b) and a[:-1] == b[:-1] and "a" in (a[-1], b[-1])
+
+
+def same_name(given, stored, spoken: bool = False) -> bool:
+    """The same person: the first name must match exactly (Latin or Cyrillic, any case or spacing in the surname),
+    because Ivan is not Ivana and Maria is not Marina. Spoken surnames come back slightly different from turn to turn
+    ("Споруха" at booking, "Спаруха" when cancelling), so on a voice turn one misheard letter is tolerated, but never
+    a gender ending (Petrov is another person than Petrova)."""
+    given_parts, stored_parts = name_parts(given), name_parts(stored)
+    if not given_parts or not stored_parts or len(name_key(given)) < 2:
+        return False
+    if given_parts[0] != stored_parts[0]:
+        return False
+    given_surname, stored_surname = "".join(given_parts[1:]), "".join(stored_parts[1:])
+    if given_surname == stored_surname:
+        return True
+    return (spoken and min(len(given_surname), len(stored_surname)) >= 4
+            and one_letter_apart(given_surname, stored_surname) and not gender_pair(given_surname, stored_surname))
 
 
 def booking_names(row) -> list:
@@ -437,22 +468,22 @@ def booking_names(row) -> list:
     return [row["customer_name"], *extra]
 
 
-def is_owner(row, customer_name) -> bool:
+def is_owner(row, customer_name, spoken: bool = False) -> bool:
     """The booking name works as a simple check that the caller owns the reservation (the code is the real key).
-    Any of the reservation's names works."""
-    return any(same_name(customer_name, name) for name in booking_names(row))
+    Any of the reservation's names works. `spoken`: the name came through speech recognition (set by the server)."""
+    return any(same_name(customer_name, name, spoken) for name in booking_names(row))
 
 
 MAX_EXTRA_NAMES = 3
 
 
-def cancel_reservation(code: str, customer_name: str):
+def cancel_reservation(code: str, customer_name: str, spoken: bool = False):
     code = normalize_code(code)
     with db() as conn:
         row = conn.execute("SELECT customer_name, status FROM reservations WHERE code = ?", (code,)).fetchone()
         if not row:
             return error(NOT_FOUND.format(code=code))
-        if not is_owner(row, customer_name):
+        if not is_owner(row, customer_name, spoken):
             return error(WRONG_NAME)
         if row["status"] == "cancelled":
             return result("success", reservation_code=code, already_cancelled=True)
@@ -462,7 +493,7 @@ def cancel_reservation(code: str, customer_name: str):
 
 
 def update_reservation(code: str, customer_name: str, add_note: str = None, date: str = None, time: str = None,
-                       guests: int = None, add_name: str = None):
+                       guests: int = None, add_name: str = None, spoken: bool = False):
     """Add a note (e.g. an allergy) or another name, and/or move the reservation to another date, time or party size.
 
     The name it was booked under is never replaced: an added name is kept next to it, and every change is
@@ -483,7 +514,7 @@ def update_reservation(code: str, customer_name: str, add_note: str = None, date
         if not row:
             conn.execute("ROLLBACK")
             return error(NOT_FOUND.format(code=code))
-        if not is_owner(row, customer_name):
+        if not is_owner(row, customer_name, spoken):
             conn.execute("ROLLBACK")
             return error(WRONG_NAME)
         if row["status"] != "confirmed":
